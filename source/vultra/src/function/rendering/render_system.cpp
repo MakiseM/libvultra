@@ -427,6 +427,7 @@ namespace vultra
         m_RenderWorldBack.frameIndex = m_FrameCounter;
 
         const bool gaussianOrderedClodMode = m_GaussianSplatSettings.orderedClodEnabled();
+        const bool gaussianWebGpuBackend   = rd.getBackendApi() == rhi::RenderBackendApi::eWebGPU;
 
         const uint64_t resourceRevision = gpuResourceService.contentRevision();
         const auto&    pool             = gpuResourceService.pool();
@@ -661,8 +662,12 @@ namespace vultra
             uint32_t activeGaussianSplats   = 0u;
             const uint32_t packedGaussianSources =
                 static_cast<uint32_t>(m_GpuSceneViewBack.generalGaussianSplatPackedSources.size());
+            // WebGPU's common storage-buffer limit is 8 per compute shader stage.
+            // Single-asset direct-prefix rendering avoids the extra selected-source
+            // buffer used by the baseline path while preserving full-prefix output.
             const bool gaussianDirectPrefix =
-                gaussianOrderedClodMode && m_GpuSceneViewBack.generalGaussianSplatDraws.size() == 1u;
+                (gaussianOrderedClodMode || gaussianWebGpuBackend) &&
+                m_GpuSceneViewBack.generalGaussianSplatDraws.size() == 1u;
             gaussianStats.directPrefix = gaussianDirectPrefix;
             if (gaussianDirectPrefix)
             {
