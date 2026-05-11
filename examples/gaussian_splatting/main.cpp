@@ -4,6 +4,7 @@
 #include <vultra/function/rendering/render_structs.hpp>
 #include <vultra/function/rendering/runtime_profiler.hpp>
 #include <vultra/function/services/asset_service.hpp>
+#include <vultra/function/services/render_backend_service.hpp>
 #include <vultra/function/services/render_service.hpp>
 #include <vultra/function/services/scene_service.hpp>
 #include <vultra/function/services/world_service.hpp>
@@ -465,7 +466,9 @@ protected:
         auto& sceneService = engine.ctx().services.require<ISceneService>();
         auto& worldService = engine.ctx().services.require<IWorldService>();
         auto& renderService = engine.ctx().services.require<IRenderService>();
+        auto& backendService = engine.ctx().services.require<IRenderBackendService>();
         m_RenderService     = &renderService;
+        const auto backendApi = backendService.renderDevice().getBackendApi();
 
         auto& world = worldService.world();
         sceneService.instantiateScene(world, "res://scenes/3dgs_example.vmanifest");
@@ -475,6 +478,21 @@ protected:
         {
             m_Options.mode = GaussianSplatBaselineMode::eOrderedClod;
             VULTRA_CLIENT_INFO("CLOD option detected; using gaussian mode: ordered-clod");
+        }
+        if (backendApi == rhi::RenderBackendApi::eWebGPU &&
+            (!m_Options.mode || *m_Options.mode == GaussianSplatBaselineMode::eBaseline))
+        {
+            if (m_Options.mode)
+            {
+                VULTRA_CLIENT_WARN(
+                    "WebGPU gaussian baseline exceeds the current compute storage-buffer limit; using ordered-clod");
+            }
+            else
+            {
+                VULTRA_CLIENT_INFO(
+                    "WebGPU gaussian renderer uses ordered-clod to stay within compute storage-buffer limits");
+            }
+            m_Options.mode = GaussianSplatBaselineMode::eOrderedClod;
         }
         if (m_Options.mode)
             settings.baselineMode = *m_Options.mode;
