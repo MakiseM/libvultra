@@ -220,28 +220,38 @@ namespace vultra
             OPENXR_CHECK(xrGetSystemProperties(m_XrInstance, m_XrSystemId, &m_XrSystemProperties),
                          "Failed to get SystemProperties.");
 
-            // Check for eye gaze interaction support
-            XrSystemEyeGazeInteractionPropertiesEXT eyeGazeProps {};
-            eyeGazeProps.type = XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT;
-
-            // Call xrGetSystemProperties again to fill in the eye gaze properties
-            m_XrSystemProperties.next = &eyeGazeProps;
-            XrResult result           = xrGetSystemProperties(m_XrInstance, m_XrSystemId, &m_XrSystemProperties);
-            if (result == XR_SUCCESS)
+            // Check for eye gaze interaction support only when the extension was enabled.
+            if (IsStringInVector(m_XrActiveInstanceExtensions, XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME))
             {
-                if (eyeGazeProps.supportsEyeGazeInteraction)
+                XrSystemEyeGazeInteractionPropertiesEXT eyeGazeProps {};
+                eyeGazeProps.type = XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT;
+
+                m_XrSystemProperties.next = &eyeGazeProps;
+                XrResult result           = xrGetSystemProperties(m_XrInstance, m_XrSystemId, &m_XrSystemProperties);
+                m_XrSystemProperties.next = nullptr;
+                if (result == XR_SUCCESS)
                 {
-                    VULTRA_CORE_INFO("Eye gaze interaction is supported.");
-                    m_Properties.supportEyeTracking = true;
+                    if (eyeGazeProps.supportsEyeGazeInteraction)
+                    {
+                        VULTRA_CORE_INFO("Eye gaze interaction is supported.");
+                        m_Properties.supportEyeTracking = true;
+                    }
+                    else
+                    {
+                        VULTRA_CORE_WARN("Eye gaze interaction support bit is false; attempting action path because "
+                                         "{} is active.",
+                                         XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME);
+                        m_Properties.supportEyeTracking = true;
+                    }
                 }
                 else
                 {
-                    VULTRA_CORE_INFO("Eye gaze interaction is not supported.");
+                    VULTRA_CORE_ERROR("Failed to get eye gaze interaction properties.");
                 }
             }
             else
             {
-                VULTRA_CORE_ERROR("Failed to get eye gaze interaction properties.");
+                VULTRA_CORE_INFO("Eye gaze interaction extension is not active.");
             }
 
             auto runtimeInfo = fmt::format("[OpenXR] OpenXR Runtime: {} - {}.{}.{}",

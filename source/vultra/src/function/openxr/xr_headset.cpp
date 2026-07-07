@@ -5,6 +5,8 @@
 #include "vultra/core/rhi/structs/extent2d.hpp"
 #include "vultra/core/rhi/render_device.hpp"
 #include "vultra/core/rhi/backends/vk/vulkan_render_device_access.hpp"
+#include "vultra/function/openxr/ext/xr_eyetracker.hpp"
+#include "vultra/function/openxr/xr_common_action.hpp"
 #include "vultra/function/openxr/xr_device.hpp"
 #include "vultra/function/openxr/xr_helper.hpp"
 
@@ -241,6 +243,21 @@ namespace vultra
             m_EyeViewMatrices.resize(m_EyeCount);
             m_EyeProjectionMatrices.resize(m_EyeCount);
             m_EyeFOVs.resize(m_EyeCount);
+
+            if (m_Device.getProperties().supportEyeTracking)
+            {
+                try
+                {
+                    m_CommonAction =
+                        std::make_unique<XRCommonAction>(m_Device.m_XrInstance, m_Session, true);
+                    VULTRA_CORE_INFO("[XRHeadset] Eye gaze action path enabled.");
+                }
+                catch (const std::exception& e)
+                {
+                    VULTRA_CORE_WARN("[XRHeadset] Eye gaze action path unavailable: {}", e.what());
+                    m_CommonAction.reset();
+                }
+            }
         }
 
         XRHeadset::~XRHeadset()
@@ -406,6 +423,12 @@ namespace vultra
                     xrutils::createProjectionMatrix(eyeRenderInfo.fov, 0.1f, 1000.0f);
             }
 
+            if (m_CommonAction)
+            {
+                if (!m_CommonAction->sync(m_Space, m_FrameState.predictedDisplayTime))
+                    VULTRA_CORE_TRACE("[XRHeadset] Eye gaze/input action sync reported no valid data.");
+            }
+
             // Acquire the swapchain image
             XrSwapchainImageAcquireInfo swapchainImageAcquireInfo {};
             swapchainImageAcquireInfo.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
@@ -505,6 +528,20 @@ namespace vultra
         }
 
         XrFovf XRHeadset::getEyeFOV(size_t eyeIndex) const { return m_EyeFOVs.at(eyeIndex); }
+
+        bool XRHeadset::isEyeTrackingSupported() const { return static_cast<bool>(m_CommonAction); }
+
+        bool XRHeadset::isGazePoseValid() const
+        {
+            const auto* eyeTracker = m_CommonAction ? m_CommonAction->getEyeTracker() : nullptr;
+            return eyeTracker && eyeTracker->isGazePoseValid();
+        }
+
+        XrPosef XRHeadset::getGazePose() const
+        {
+            const auto* eyeTracker = m_CommonAction ? m_CommonAction->getEyeTracker() : nullptr;
+            return eyeTracker ? eyeTracker->getGazePose() : xrutils::makeIdentity();
+        }
 
         float XRHeadset::getIPD() const
         {

@@ -15,10 +15,10 @@
 #include "vultra/function/services/render_service.hpp"
 #include "vultra/function/services/world_service.hpp"
 
-#include <glm/vec3.hpp>
-
+#include <array>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace vultra
 {
@@ -26,6 +26,29 @@ namespace vultra
     {
         class Texture;
     }
+
+    struct GaussianSplatFoveatedP95ControllerState
+    {
+        std::vector<double> gpuWindow;
+        double              p95Ema {-1.0};
+        uint32_t            growCounter {0};
+        uint32_t            shrinkCounter {0};
+        double              dynamicFrameMsEma {-1.0};
+        uint32_t            dynamicGrowCounter {0};
+        uint32_t            dynamicShrinkCounter {0};
+        GaussianSplatFoveatedAdaptationMode mode {GaussianSplatFoveatedAdaptationMode::eFixed};
+    };
+
+    struct GaussianSplatShPopAggregateState
+    {
+        bool                    valid {false};
+        glm::vec2               gaze {0.5f, 0.5f};
+        glm::uvec3              shDegrees {3u, 3u, 3u};
+        std::array<uint32_t, 3> ringCounts {0u, 0u, 0u};
+        uint32_t                selectedCount {0u};
+        uint32_t                guardRaisedCount {0u};
+        uint32_t                downgradeCandidateFrames {0u};
+    };
 
     // RenderSystem (SRP host):
     // - Reads cooked cameras from CameraSystem
@@ -62,6 +85,10 @@ namespace vultra
         GaussianSplatRenderSettings&       gaussianSplatSettings() override { return m_GaussianSplatSettings; }
         const GaussianSplatRenderSettings& gaussianSplatSettings() const override { return m_GaussianSplatSettings; }
         const GaussianSplatFrameStats&     gaussianSplatFrameStats() const override { return m_GaussianSplatStats; }
+        const rhi::Texture*                gaussianSplatLastAlphaTexture() const override
+        {
+            return m_GpuSceneViewFront.generalGaussianSplatLastAlphaTexture;
+        }
 
     private:
         Ref<Renderer> resolveRenderer(const RenderCamera& cam) const;
@@ -97,19 +124,52 @@ namespace vultra
         GaussianSplatRenderSettings m_GaussianSplatSettings;
         GaussianSplatRenderSettings m_AppliedGaussianSplatSettings;
         GaussianSplatFrameStats     m_GaussianSplatStats;
+        GaussianSplatShPopAggregateState m_GaussianShPopAggregateState;
+        GaussianSplatFoveatedP95ControllerState m_FoveatedP95ControllerState;
+        std::vector<uint16_t> m_GaussianFoveatedScoreResidency;
 
-        struct GaussianSplatLodViewState
+        bool m_GaussianGazeAnchorValid {false};
+        glm::vec2 m_GaussianGazeAnchorGaze {0.5f, 0.5f};
+        glm::vec2 m_GaussianGazeAnchorPreviousGaze {0.5f, 0.5f};
+        uint64_t m_GaussianGazeAnchorLastUpdateFrame {0u};
+        uint32_t m_GaussianGazeAnchorUpdateEventCount {0u};
+        uint32_t m_GaussianGazeAnchorDeadbandViolationCount {0u};
+        bool m_GaussianEccStochasticTransitionValid {false};
+        glm::vec2 m_GaussianEccStochasticOldGaze {0.5f, 0.5f};
+        glm::vec2 m_GaussianEccStochasticNewGaze {0.5f, 0.5f};
+        uint64_t m_GaussianEccStochasticLastUpdateFrame {0u};
+        uint32_t m_GaussianEccStochasticUpdateEventCount {0u};
+        struct GaussianCachedSelectionOracleCandidate
         {
-            bool      valid {false};
-            glm::vec3 cameraPosition {0.0f};
-            float     fovY {0.0f};
-            uint32_t  extentWidth {0};
-            uint32_t  extentHeight {0};
-            uint64_t  nextSelectionFrame {0};
-            bool      observedCameraValid {false};
-            glm::vec3 observedCameraPosition {0.0f};
-            uint32_t  stationaryFrameCount {0};
-        } m_AppliedGaussianSplatLodViewState;
+            resource::GpuGeneralGaussianSplatSelectedSource selection {};
+            uint32_t sourceId {0u};
+            uint32_t rank {0u};
+            glm::vec2 centerNdc {0.0f};
+            float angularFootprintRadiusDegrees {0.0f};
+            float opacityProxy {0.0f};
+            double projectedAreaPx {0.0};
+            uint64_t tileCost {0u};
+            uint64_t hashKey {0u};
+            float hashThreshold {0.0f};
+            bool visibleAtCache {false};
+            bool staticRandomSelected {false};
+            bool matchedNullSelected {false};
+        };
+
+        bool m_GaussianCachedSelectionOracleValid {false};
+        GaussianSplatCachedSelectionMembershipMode m_GaussianCachedSelectionOracleMode {
+            GaussianSplatCachedSelectionMembershipMode::eDynamicDeterministic};
+        uint32_t m_GaussianCachedSelectionOracleSeed {0u};
+        uint32_t m_GaussianCachedSelectionOracleSourceCount {0u};
+        uint32_t m_GaussianCachedSelectionOracleCandidateCount {0u};
+        uint32_t m_GaussianCachedSelectionOracleActiveCount {0u};
+        uint32_t m_GaussianCachedSelectionOracleCacheFrameIndex {UINT32_MAX};
+        uint32_t m_GaussianCachedSelectionOracleStaticTargetCount {UINT32_MAX};
+        bool     m_GaussianCachedSelectionOracleMatchedNullValid {false};
+        uint32_t m_GaussianCachedSelectionOracleMatchedNullFrameIndex {UINT32_MAX};
+        std::vector<GaussianCachedSelectionOracleCandidate> m_GaussianCachedSelectionOracleCandidates;
+        uint64_t m_GaussianProjectedCostCacheSalt {0u};
+        uint64_t m_GaussianProjectedCostCacheEpoch {0u};
     };
 
     // Cook World into RenderWorld.

@@ -5,6 +5,7 @@
 
 #include <renderdoc_app.h>
 
+#include <string>
 #include <string_view>
 
 namespace vultra
@@ -24,7 +25,7 @@ namespace vultra
         bool isFrameCapturing() const;
 
         void startFrameCapture() const;
-        void endFrameCapture() const;
+        bool endFrameCapture() const;
 
         void setCaptureFilePathTemplate(const std::string_view path) const;
         void setCaptureTitle(const std::string_view title) const;
@@ -35,6 +36,7 @@ namespace vultra
         void showReplayUI() const;
 
         uint32_t getCaptureCount() const;
+        std::string getCapturePath(uint32_t index) const;
 
     private:
         bool loadDLL();

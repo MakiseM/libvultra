@@ -11,6 +11,8 @@
 
 #include <glm/glm.hpp>
 
+#include <memory>
+
 namespace vultra
 {
     namespace rhi
@@ -22,6 +24,7 @@ namespace vultra
     namespace openxr
     {
         class XRDevice;
+        class XRCommonAction;
 
         class XRHeadset
         {
@@ -65,6 +68,9 @@ namespace vultra
             [[nodiscard]] glm::mat4     getEyeViewMatrix(size_t eyeIndex) const;
             [[nodiscard]] glm::mat4     getEyeProjectionMatrix(size_t eyeIndex) const;
             [[nodiscard]] XrFovf        getEyeFOV(size_t eyeIndex) const;
+            [[nodiscard]] bool          isEyeTrackingSupported() const;
+            [[nodiscard]] bool          isGazePoseValid() const;
+            [[nodiscard]] XrPosef       getGazePose() const;
 
             [[nodiscard]] float getIPD() const;
 
@@ -105,6 +111,7 @@ namespace vultra
             rhi::PixelFormat                        m_SwapchainPixelFormat {rhi::PixelFormat::eUndefined};
 
             std::vector<StereoRenderTargetView> m_SwapchainStereoRenderTargetViews;
+            std::unique_ptr<XRCommonAction>      m_CommonAction;
 
             bool m_ExitRequested {false};
         };

@@ -25,6 +25,7 @@ namespace vultra
         RenderDocAPI* m_RenderDocAPI {nullptr};
 
         bool m_CaptureRequested {false};
+        bool m_CaptureActive {false};
         bool m_ShowCaptureUIRequested {false};
     };
 } // namespace vultra

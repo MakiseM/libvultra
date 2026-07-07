@@ -19,6 +19,7 @@ namespace vultra
 
                 XrActionSet    getActionSet() const { return m_GamePlayActionSet; }
                 const XrPosef& getGazePose() const { return m_GazePose; }
+                bool           isGazePoseValid() const { return m_GazePoseValid; }
 
             private:
                 XrInstance m_XrInstance = XR_NULL_HANDLE;
@@ -30,6 +31,7 @@ namespace vultra
                 XrSpace m_GazeActionSpace {XR_NULL_HANDLE};
 
                 XrPosef m_GazePose {};
+                bool    m_GazePoseValid {false};
 
                 XrActionSet m_GamePlayActionSet = XR_NULL_HANDLE;
                 XrAction    m_UserIntentAction  = XR_NULL_HANDLE;

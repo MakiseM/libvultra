@@ -317,12 +317,20 @@ namespace vultra::resource
             Ref<rhi::StorageBuffer> covarianceBuffer {nullptr};
             Ref<rhi::StorageBuffer> colorBuffer {nullptr};
             Ref<rhi::StorageBuffer> shBuffer {nullptr};
+            Ref<rhi::StorageBuffer> shL1Buffer {nullptr};
+            Ref<rhi::StorageBuffer> shL2Buffer {nullptr};
+            Ref<rhi::StorageBuffer> shL3Buffer {nullptr};
+            Ref<rhi::StorageBuffer> shEnergyMetadataBuffer {nullptr};
 
             std::vector<glm::vec4>  cpuCenters;
             std::vector<glm::vec4>  cpuScales;
             std::vector<glm::uvec4> cpuCovariances;
             std::vector<glm::uvec2> cpuColors;
             std::vector<glm::uvec2> cpuSh;
+            std::vector<glm::uvec2> cpuShL1;
+            std::vector<glm::uvec2> cpuShL2;
+            std::vector<glm::uvec2> cpuShL3;
+            std::vector<GpuGaussianSplatShEnergyMetadata> cpuShEnergyMetadata;
 
             void reset()
             {
@@ -331,11 +339,53 @@ namespace vultra::resource
                 covarianceBuffer = nullptr;
                 colorBuffer      = nullptr;
                 shBuffer         = nullptr;
+                shL1Buffer       = nullptr;
+                shL2Buffer       = nullptr;
+                shL3Buffer       = nullptr;
+                shEnergyMetadataBuffer = nullptr;
                 cpuCenters.clear();
                 cpuScales.clear();
                 cpuCovariances.clear();
                 cpuColors.clear();
                 cpuSh.clear();
+                cpuShL1.clear();
+                cpuShL2.clear();
+                cpuShL3.clear();
+                cpuShEnergyMetadata.clear();
+            }
+
+            uint32_t appendPackedShCoeffs(rhi::RenderDevice&          rd,
+                                          Ref<rhi::StorageBuffer>&     buffer,
+                                          std::vector<glm::uvec2>&     cpu,
+                                          const glm::uvec2*            data,
+                                          uint32_t                     count,
+                                          const uint64_t               initialCapacityBytes)
+            {
+                if (!data || count == 0)
+                    return static_cast<uint32_t>(cpu.size());
+
+                const uint32_t base = static_cast<uint32_t>(cpu.size());
+                cpu.insert(cpu.end(), data, data + count);
+                const uint64_t requiredBytes = static_cast<uint64_t>(cpu.size()) * sizeof(glm::uvec2);
+                bool           grew          = false;
+                if (!buffer || static_cast<uint64_t>(buffer->getSize()) < requiredBytes)
+                {
+                    uint64_t oldCap = buffer ? static_cast<uint64_t>(buffer->getSize()) : 0ull;
+                    uint64_t newCap = oldCap == 0 ? initialCapacityBytes : oldCap * 2ull;
+                    if (newCap < requiredBytes)
+                        newCap = requiredBytes;
+                    buffer = createRef<rhi::StorageBuffer>(rd.createStorageBuffer(newCap));
+                    grew   = true;
+                }
+
+                if (grew)
+                    rd.uploadS(*buffer, 0, requiredBytes, cpu.data());
+                else
+                    rd.uploadS(*buffer,
+                               static_cast<uint64_t>(base) * sizeof(glm::uvec2),
+                               static_cast<uint64_t>(count) * sizeof(glm::uvec2),
+                               data);
+                return base;
             }
 
             uint32_t appendCenters(rhi::RenderDevice& rd, const glm::vec4* data, uint32_t count)
@@ -456,29 +506,53 @@ namespace vultra::resource
 
             uint32_t appendSh(rhi::RenderDevice& rd, const glm::uvec2* data, uint32_t count)
             {
-                if (!data || count == 0)
-                    return static_cast<uint32_t>(cpuSh.size());
+                return appendPackedShCoeffs(rd, shBuffer, cpuSh, data, count, 512ull * 1024ull);
+            }
 
-                const uint32_t base = static_cast<uint32_t>(cpuSh.size());
-                cpuSh.insert(cpuSh.end(), data, data + count);
-                const uint64_t requiredBytes = static_cast<uint64_t>(cpuSh.size()) * sizeof(glm::uvec2);
-                bool           grew          = false;
-                if (!shBuffer || static_cast<uint64_t>(shBuffer->getSize()) < requiredBytes)
+            uint32_t appendShL1(rhi::RenderDevice& rd, const glm::uvec2* data, uint32_t count)
+            {
+                return appendPackedShCoeffs(rd, shL1Buffer, cpuShL1, data, count, 256ull * 1024ull);
+            }
+
+            uint32_t appendShL2(rhi::RenderDevice& rd, const glm::uvec2* data, uint32_t count)
+            {
+                return appendPackedShCoeffs(rd, shL2Buffer, cpuShL2, data, count, 256ull * 1024ull);
+            }
+
+            uint32_t appendShL3(rhi::RenderDevice& rd, const glm::uvec2* data, uint32_t count)
+            {
+                return appendPackedShCoeffs(rd, shL3Buffer, cpuShL3, data, count, 256ull * 1024ull);
+            }
+
+            uint32_t appendShEnergyMetadata(rhi::RenderDevice&                         rd,
+                                            const GpuGaussianSplatShEnergyMetadata* data,
+                                            uint32_t                               count)
+            {
+                if (!data || count == 0)
+                    return static_cast<uint32_t>(cpuShEnergyMetadata.size());
+
+                const uint32_t base = static_cast<uint32_t>(cpuShEnergyMetadata.size());
+                cpuShEnergyMetadata.insert(cpuShEnergyMetadata.end(), data, data + count);
+                const uint64_t requiredBytes =
+                    static_cast<uint64_t>(cpuShEnergyMetadata.size()) * sizeof(GpuGaussianSplatShEnergyMetadata);
+                bool grew = false;
+                if (!shEnergyMetadataBuffer ||
+                    static_cast<uint64_t>(shEnergyMetadataBuffer->getSize()) < requiredBytes)
                 {
-                    uint64_t oldCap = shBuffer ? static_cast<uint64_t>(shBuffer->getSize()) : 0ull;
-                    uint64_t newCap = oldCap == 0 ? 512ull * 1024ull : oldCap * 2ull;
+                    uint64_t oldCap = shEnergyMetadataBuffer ? static_cast<uint64_t>(shEnergyMetadataBuffer->getSize()) : 0ull;
+                    uint64_t newCap = oldCap == 0 ? 256ull * 1024ull : oldCap * 2ull;
                     if (newCap < requiredBytes)
                         newCap = requiredBytes;
-                    shBuffer = createRef<rhi::StorageBuffer>(rd.createStorageBuffer(newCap));
-                    grew     = true;
+                    shEnergyMetadataBuffer = createRef<rhi::StorageBuffer>(rd.createStorageBuffer(newCap));
+                    grew = true;
                 }
 
                 if (grew)
-                    rd.uploadS(*shBuffer, 0, requiredBytes, cpuSh.data());
+                    rd.uploadS(*shEnergyMetadataBuffer, 0, requiredBytes, cpuShEnergyMetadata.data());
                 else
-                    rd.uploadS(*shBuffer,
-                               static_cast<uint64_t>(base) * sizeof(glm::uvec2),
-                               static_cast<uint64_t>(count) * sizeof(glm::uvec2),
+                    rd.uploadS(*shEnergyMetadataBuffer,
+                               static_cast<uint64_t>(base) * sizeof(GpuGaussianSplatShEnergyMetadata),
+                               static_cast<uint64_t>(count) * sizeof(GpuGaussianSplatShEnergyMetadata),
                                data);
                 return base;
             }

@@ -3,6 +3,7 @@
 #include "vultra/function/rendering/render_structs.hpp"
 
 #include <array>
+#include <glm/vec2.hpp>
 #include <glm/vec4.hpp>
 
 namespace vultra
@@ -24,6 +25,8 @@ namespace vultra
         uint32_t                           multiviewMask {0};
         std::array<const RenderCamera*, 2> multiviewCameras {nullptr, nullptr};
         uint32_t                           multiviewCameraCount {0};
+        bool                               xrGazeValid {false};
+        glm::vec2                          xrGazeUv {0.5f, 0.5f};
 
         resource::GpuSceneDatabase* gpuSceneDatabase {nullptr};
         resource::GpuSceneView*     gpuSceneView {nullptr};

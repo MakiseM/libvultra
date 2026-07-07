@@ -236,6 +236,18 @@ namespace vultra
                 m_Impl->insertComputeUavBarrier();
                 return *this;
             }
+            CommandBuffer& insertBufferBarrier(Buffer&             buffer,
+                                               const BarrierScope& src,
+                                               const BarrierScope& dst,
+                                               const uint64_t      offset = 0,
+                                               const uint64_t      size = UINT64_MAX)
+            {
+                assert(m_Impl);
+                auto& barrierBuilder = m_Impl->getBarrierBuilder();
+                barrierBuilder.m_BufferBarriers.push_back(BarrierBuffer {&buffer, offset, size, src, dst});
+                buffer.setBarrierScope(dst);
+                return *this;
+            }
 
             CommandBuffer& traceRays(const ShaderBindingTable& sbt, const glm::uvec3& extent)
             {
@@ -345,6 +357,10 @@ namespace vultra
             {
                 assert(m_Impl);
                 m_Impl->clear(buffer, value);
+                const_cast<Buffer&>(buffer).setBarrierScope({
+                    .dstStage  = PipelineStages::eTransfer,
+                    .dstAccess = Access::eTransferWrite,
+                });
                 return *this;
             }
             // Texture image must be created with TRANSFER_DST.
@@ -360,6 +376,14 @@ namespace vultra
                 assert(m_Impl);
                 s_CopyOps.fetch_add(1, std::memory_order_relaxed);
                 m_Impl->copyBuffer(src, dst, copyRegion);
+                const_cast<Buffer&>(src).setBarrierScope({
+                    .dstStage  = PipelineStages::eTransfer,
+                    .dstAccess = Access::eTransferRead,
+                });
+                dst.setBarrierScope({
+                    .dstStage  = PipelineStages::eTransfer,
+                    .dstAccess = Access::eTransferWrite,
+                });
                 return *this;
             }
             CommandBuffer& copyBuffer(const Buffer& src, Texture& dst)
@@ -390,6 +414,10 @@ namespace vultra
                 assert(m_Impl);
                 s_UpdateOps.fetch_add(1, std::memory_order_relaxed);
                 m_Impl->update(buffer, offset, size, data);
+                buffer.setBarrierScope({
+                    .dstStage  = PipelineStages::eTransfer,
+                    .dstAccess = Access::eTransferWrite,
+                });
                 return *this;
             }
 

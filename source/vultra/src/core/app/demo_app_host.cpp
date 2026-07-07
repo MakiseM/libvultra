@@ -26,10 +26,13 @@
 #include <glm/trigonometric.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace vultra
@@ -63,6 +66,17 @@ namespace vultra
                 return rhi::RenderBackendApi::eAuto;
             }
             return std::nullopt;
+        }
+
+        [[nodiscard]] std::optional<uint32_t> parseU32Token(const std::string_view token)
+        {
+            uint64_t value = 0;
+            const auto* begin = token.data();
+            const auto* end   = token.data() + token.size();
+            const auto  result = std::from_chars(begin, end, value);
+            if (result.ec != std::errc {} || result.ptr != end || value > std::numeric_limits<uint32_t>::max())
+                return std::nullopt;
+            return static_cast<uint32_t>(value);
         }
 
         [[nodiscard]] std::optional<UniversalRenderer::RenderProfile> parseRenderProfileToken(const std::string_view token)
@@ -185,6 +199,42 @@ namespace vultra
             }
             return parsed;
         }
+
+        void applyCliWindowSize(std::span<const std::string> args, EngineContext::Config& config)
+        {
+            auto consumeValue = [&](size_t& i, const std::string_view option) -> std::optional<std::string_view> {
+                const std::string_view arg = args[i];
+                if (arg == option)
+                {
+                    if ((i + 1) >= args.size())
+                        return std::string_view {};
+                    return args[++i];
+                }
+                if (arg.size() > option.size() && arg.starts_with(option) && arg[option.size()] == '=')
+                    return arg.substr(option.size() + 1u);
+                return std::nullopt;
+            };
+
+            for (size_t i = 0; i < args.size(); ++i)
+            {
+                if (const auto value = consumeValue(i, "--window-width"))
+                {
+                    if (const auto parsed = parseU32Token(*value); parsed && *parsed > 0u)
+                        config.window.width = *parsed;
+                    else
+                        VULTRA_CORE_WARN("[DemoAppHost] Ignoring invalid --window-width value");
+                    continue;
+                }
+                if (const auto value = consumeValue(i, "--window-height"))
+                {
+                    if (const auto parsed = parseU32Token(*value); parsed && *parsed > 0u)
+                        config.window.height = *parsed;
+                    else
+                        VULTRA_CORE_WARN("[DemoAppHost] Ignoring invalid --window-height value");
+                    continue;
+                }
+            }
+        }
     } // namespace
 
 #if defined(__ANDROID__)
@@ -257,6 +307,7 @@ namespace vultra
 
         engine.ctx().config.window.title                   = demoWindowTitle();
         engine.ctx().config.window.resizable               = demoWindowResizable();
+        applyCliWindowSize(commandLineArgs(), engine.ctx().config);
         engine.ctx().config.render.backendApi              = backendApi;
         engine.ctx().config.render.renderDeviceFeatureFlag = demoRenderDeviceFeatureFlag();
         engine.ctx().config.render.builtinShaderLibrary =

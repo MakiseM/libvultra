@@ -14,6 +14,10 @@ namespace vultra
     struct GaussianSplatFrameStats;
     struct GaussianSplatRenderSettings;
     struct RenderCamera;
+    namespace rhi
+    {
+        class Texture;
+    }
 
     class IRenderService
     {
@@ -34,5 +38,6 @@ namespace vultra
         virtual GaussianSplatRenderSettings&       gaussianSplatSettings() = 0;
         virtual const GaussianSplatRenderSettings& gaussianSplatSettings() const = 0;
         virtual const GaussianSplatFrameStats&     gaussianSplatFrameStats() const = 0;
+        virtual const rhi::Texture*                gaussianSplatLastAlphaTexture() const = 0;
     };
 } // namespace vultra

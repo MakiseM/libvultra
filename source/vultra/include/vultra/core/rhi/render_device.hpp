@@ -215,6 +215,16 @@ namespace vultra
                                    const std::string&     filePath,
                                    const rhi::ImageAspect imageAspect = rhi::ImageAspect::eColor);
 
+            bool readTextureToRgba8(const Texture&         texture,
+                                    std::vector<uint8_t>&  rgba,
+                                    uint32_t&              width,
+                                    uint32_t&              height,
+                                    const rhi::ImageAspect imageAspect = rhi::ImageAspect::eColor);
+
+            bool saveTextureAlphaToFile(const Texture&         texture,
+                                        const std::string&     filePath,
+                                        const rhi::ImageAspect imageAspect = rhi::ImageAspect::eColor);
+
             // For the RTX
             // General for ray query
             [[nodiscard]] AccelerationStructure

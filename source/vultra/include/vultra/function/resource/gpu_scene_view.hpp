@@ -12,8 +12,14 @@
 #include "vultra/function/resource/gpu_scene_database.hpp"
 #include "vultra/function/resource/gpu_visible_meshlet.hpp"
 
-#include <cstdint>
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
+#include <glm/common.hpp>
+
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -24,6 +30,8 @@ namespace vultra::rhi
 
 namespace vultra::resource
 {
+    inline constexpr uint32_t kGeneralGaussianSplatFoveatedLayerCount = 3u;
+
     enum class GpuSceneBuildMode : uint8_t
     {
         eCpuDriven,
@@ -73,21 +81,126 @@ namespace vultra::resource
         Ref<rhi::StorageBuffer>                generalGaussianSplatSortKeyBuffer {nullptr};
         Ref<rhi::StorageBuffer>                generalGaussianSplatSortIndexBuffer {nullptr};
         Ref<rhi::StorageBuffer>                generalGaussianSplatVisibleCountBuffer {nullptr};
+        Ref<rhi::StorageBuffer>                generalGaussianSplatEcsptCounterBuffer {nullptr};
+        Ref<rhi::StorageBuffer>                generalGaussianSplatEcsptCounterReadbackBuffer {nullptr};
         Ref<rhi::StorageBuffer>                generalGaussianSplatDispatchArgsBuffer {nullptr};
         Ref<rhi::StorageBuffer>                generalGaussianSplatSortStorageBuffer {nullptr};
         Ref<rhi::StorageBuffer>                generalGaussianSplatShBuffer {nullptr};
+        Ref<rhi::StorageBuffer>                generalGaussianSplatShL1Buffer {nullptr};
+        Ref<rhi::StorageBuffer>                generalGaussianSplatShL2Buffer {nullptr};
+        Ref<rhi::StorageBuffer>                generalGaussianSplatShL3Buffer {nullptr};
+        Ref<rhi::StorageBuffer>                generalGaussianSplatShEnergyMetadataBuffer {nullptr};
+        Ref<rhi::StorageBuffer>                generalGaussianSplatTemporalStateBuffer {nullptr};
+        Ref<rhi::StorageBuffer>                generalGaussianSplatCoverageTextureBuffer {nullptr};
+        Ref<rhi::StorageBuffer>                generalGaussianSplatProjectedCostChunkBuffer {nullptr};
+        Ref<rhi::StorageBuffer>                generalGaussianSplatProjectedCostReadbackBuffer {nullptr};
+        rhi::Texture*                          generalGaussianSplatLastAlphaTexture {nullptr};
         std::optional<rhi::DrawIndirectBuffer> generalGaussianSplatIndirectBuffer;
         std::optional<rhi::RadixSorter>        generalGaussianSplatSorter;
+        bool                                   generalGaussianSplatDeterministicSourceOrderSort {false};
+        std::array<Ref<rhi::StorageBuffer>, kGeneralGaussianSplatFoveatedLayerCount>
+            generalGaussianSplatFoveatedVisibleSplatBuffers {};
+        std::array<Ref<rhi::StorageBuffer>, kGeneralGaussianSplatFoveatedLayerCount>
+            generalGaussianSplatFoveatedSortKeyBuffers {};
+        std::array<Ref<rhi::StorageBuffer>, kGeneralGaussianSplatFoveatedLayerCount>
+            generalGaussianSplatFoveatedSortIndexBuffers {};
+        std::array<Ref<rhi::StorageBuffer>, kGeneralGaussianSplatFoveatedLayerCount>
+            generalGaussianSplatFoveatedVisibleCountBuffers {};
+        std::array<std::optional<rhi::DrawIndirectBuffer>, kGeneralGaussianSplatFoveatedLayerCount>
+            generalGaussianSplatFoveatedIndirectBuffers {};
 
         uint32_t maxVisibleInstances {0};
         uint32_t maxVisibleMeshlets {0};
         uint32_t maxDraws {0};
         uint32_t maxGeneralGaussianSplatDraws {0};
-        // Source count is the full packed raw table; point count below is the
-        // current selected-source table length and can shrink under Ordered CLOD.
+        // Source count is the full packed raw table. Point count sizes the
+        // selected-source buffer, while active point count is the dispatch prefix
+        // currently consumed by preprocess.
         uint32_t maxGeneralGaussianSplatSourceCount {0};
         uint32_t maxGeneralGaussianSplatPoints {0};
+        uint32_t activeGeneralGaussianSplatPoints {0};
         uint32_t maxGeneralGaussianSplatVisibleSplats {0};
+        uint32_t generalGaussianSplatTemporalStateCapacity {0};
+        uint32_t generalGaussianSplatCoverageTextureCapacity {0};
+        uint32_t generalGaussianSplatProjectedCostChunkCapacity {0};
+        bool      generalGaussianSplatTemporalStateNeedsReset {false};
+        bool      generalGaussianSplatCoverageTextureNeedsReset {false};
+        bool      generalGaussianSplatDirectPrefix {false};
+        GpuGaussianSplatShStorageLayout generalGaussianSplatShStorageLayout {
+            GpuGaussianSplatShStorageLayout::eMonolithic};
+        bool      generalGaussianSplatFoveatedClodEnabled {false};
+        bool      generalGaussianSplatFoveatedLayeredCompositeEnabled {false};
+        bool      generalGaussianSplatFoveatedCoverageCompensationEnabled {false};
+        bool      generalGaussianSplatFoveatedScoreSelected {false};
+        bool      generalGaussianSplatFoveatedTemporalHysteresisEnabled {true};
+        bool      generalGaussianSplatFoveatedBoundarySmoothingEnabled {true};
+        glm::vec2 generalGaussianSplatFoveatedGaze {0.5f, 0.5f};
+        glm::vec2 generalGaussianSplatFoveatedRingDegrees {12.0f, 32.0f};
+        glm::vec3 generalGaussianSplatFoveatedRingLevels {1.0f, 0.40f, 0.15f};
+        glm::vec3 generalGaussianSplatFoveatedResolutionScales {1.0f, 0.75f, 0.50f};
+        float     generalGaussianSplatFoveatedTransitionDegrees {8.0f};
+        uint32_t  generalGaussianSplatFoveatedCoverageGuardMode {1u};
+        float     generalGaussianSplatFoveatedCoverageProtectionDegrees {0.0f};
+        float     generalGaussianSplatFoveatedCoverageGuardBudgetRatio {0.05f};
+        glm::vec3 generalGaussianSplatFoveatedCoverageGuardMinLevels {0.75f, 0.45f, 0.15f};
+        uint32_t  generalGaussianSplatFoveatedCoverageGuardRiskSectors {0x7u};
+        float     generalGaussianSplatFoveatedTemporalHysteresisRatio {0.25f};
+        float     generalGaussianSplatFoveatedBoundarySmoothingRatio {0.18f};
+        uint32_t  generalGaussianSplatFoveatedTemporalResidencyFrames {6u};
+        uint32_t  generalGaussianSplatFoveatedDistribution {2u};
+        float     generalGaussianSplatFoveatedContinuousTheta0Degrees {24.0f};
+        float     generalGaussianSplatFoveatedContinuousAlpha {2.0f};
+        float     generalGaussianSplatFoveatedContinuousMinLevel {0.12f};
+        float     generalGaussianSplatFoveatedTemporalPeripheralScale {0.0f};
+        bool      generalGaussianSplatFoveatedShLodEnabled {false};
+        bool      generalGaussianSplatFoveatedShSmoothSuppressionEnabled {false};
+        bool      generalGaussianSplatPeripheralTemporalFilterEnabled {false};
+        float     generalGaussianSplatPeripheralTemporalFilterOuterDegrees {56.0f};
+        float     generalGaussianSplatPeripheralTemporalFilterLambdaScale {0.85f};
+        float     generalGaussianSplatPeripheralTemporalFilterRejectionThreshold {0.18f};
+        float     generalGaussianSplatPeripheralTemporalFilterClampRadius {0.20f};
+        glm::uvec3 generalGaussianSplatFoveatedShLodDegrees {3u, 3u, 3u};
+        uint32_t  generalGaussianSplatFoveatedShLodGuardMode {0u};
+        float     generalGaussianSplatFoveatedShLodGuardThresholdMid {0.05f};
+        float     generalGaussianSplatFoveatedShLodGuardThresholdHigh {0.20f};
+        uint32_t  generalGaussianSplatShaderAntiPopMode {0u};
+        uint32_t  generalGaussianSplatShaderAntiPopHashSeed {0u};
+        float     generalGaussianSplatShaderAntiPopRampWidth {0.05f};
+        float     generalGaussianSplatShaderAntiPopGuardThreshold {0.0f};
+        float     generalGaussianSplatShaderAntiPopGuardFloor {0.0f};
+        uint32_t  generalGaussianSplatShaderAntiPopPKeepCurve {0u};
+        float     generalGaussianSplatShaderAntiPopPrefixRatio {-1.0f};
+        uint32_t  generalGaussianSplatShaderAntiPopNormalizeMode {0u};
+        float     generalGaussianSplatShaderAntiPopNormalizeStrength {1.0f};
+        float     generalGaussianSplatShaderAntiPopNormalizeClampMin {0.75f};
+        float     generalGaussianSplatShaderAntiPopNormalizeClampMax {1.15f};
+        float     generalGaussianSplatShaderAntiPopNormalizeFactor {1.0f};
+        bool      generalGaussianSplatEcsptCounterReadbackEnabled {false};
+        uint32_t  generalGaussianSplatCoverageStableReleaseFlags {0u};
+        uint32_t  generalGaussianSplatCoverageStableReleaseTileGridX {16u};
+        uint32_t  generalGaussianSplatCoverageStableReleaseTileGridY {8u};
+        uint32_t  generalGaussianSplatCoverageStableReleaseFrameIndex {0u};
+        float     generalGaussianSplatCoverageStableReleaseLambda {0.7743f};
+        float     generalGaussianSplatCoverageStableReleaseDMin {4.0f};
+        float     generalGaussianSplatCoverageStableReleaseSigmaMax {0.65f};
+        float     generalGaussianSplatCoverageStableReleaseReleaseEpsilon {1e-4f};
+        float     generalGaussianSplatCoverageTextureStrength {0.25f};
+        float     generalGaussianSplatCoverageTextureHistoryBeta {0.80f};
+        uint32_t  generalGaussianSplatCoverageTextureUpdateInterval {1u};
+        uint32_t  generalGaussianSplatDelayedGuideTemporalReleasePolicy {0u};
+        float     generalGaussianSplatDelayedGuideTemporalReleaseCapRatio {0.12f};
+        float     generalGaussianSplatDelayedGuideTemporalRiskThreshold {0.35f};
+        float     generalGaussianSplatDelayedGuideTemporalFootprintDecayScale {0.55f};
+        float     generalGaussianSplatDelayedGuideTemporalLargeFootprintPx {48.0f};
+        uint32_t  generalGaussianSplatGazeAnchorFlags {0u};
+        uint32_t  generalGaussianSplatGazeAnchorFadeFrames {4u};
+        uint32_t  generalGaussianSplatGazeAnchorMinUpdateFrames {2u};
+        float     generalGaussianSplatGazeAnchorFadePhase {1.0f};
+        float     generalGaussianSplatGazeAnchorTransitionBudgetRatio {-1.0f};
+        float     generalGaussianSplatGazeAnchorAux0 {0.0f};
+        float     generalGaussianSplatGazeAnchorAux1 {0.0f};
+        glm::vec2 generalGaussianSplatGazeAnchorOldGaze {0.5f, 0.5f};
+        glm::vec2 generalGaussianSplatGazeAnchorNewGaze {0.5f, 0.5f};
 
         void clear()
         {
@@ -114,18 +227,49 @@ namespace vultra::resource
             generalGaussianSplatSortKeyBuffer      = nullptr;
             generalGaussianSplatSortIndexBuffer    = nullptr;
             generalGaussianSplatVisibleCountBuffer = nullptr;
+            generalGaussianSplatEcsptCounterBuffer = nullptr;
+            generalGaussianSplatEcsptCounterReadbackBuffer = nullptr;
             generalGaussianSplatDispatchArgsBuffer = nullptr;
             generalGaussianSplatSortStorageBuffer  = nullptr;
             generalGaussianSplatShBuffer           = nullptr;
+            generalGaussianSplatShL1Buffer         = nullptr;
+            generalGaussianSplatShL2Buffer         = nullptr;
+            generalGaussianSplatShL3Buffer         = nullptr;
+            generalGaussianSplatShEnergyMetadataBuffer = nullptr;
+            generalGaussianSplatTemporalStateBuffer = nullptr;
+            generalGaussianSplatCoverageTextureBuffer = nullptr;
+            generalGaussianSplatProjectedCostChunkBuffer = nullptr;
+            generalGaussianSplatProjectedCostReadbackBuffer = nullptr;
+            generalGaussianSplatLastAlphaTexture = nullptr;
+            generalGaussianSplatEcsptCounterReadbackEnabled = false;
             generalGaussianSplatIndirectBuffer.reset();
             generalGaussianSplatSorter.reset();
+            for (auto& buffer : generalGaussianSplatFoveatedVisibleSplatBuffers)
+                buffer = nullptr;
+            for (auto& buffer : generalGaussianSplatFoveatedSortKeyBuffers)
+                buffer = nullptr;
+            for (auto& buffer : generalGaussianSplatFoveatedSortIndexBuffers)
+                buffer = nullptr;
+            for (auto& buffer : generalGaussianSplatFoveatedVisibleCountBuffers)
+                buffer = nullptr;
+            for (auto& buffer : generalGaussianSplatFoveatedIndirectBuffers)
+                buffer.reset();
             maxVisibleInstances          = 0;
             maxVisibleMeshlets           = 0;
             maxDraws                     = 0;
             maxGeneralGaussianSplatDraws         = 0;
             maxGeneralGaussianSplatSourceCount   = 0;
             maxGeneralGaussianSplatPoints        = 0;
+            activeGeneralGaussianSplatPoints     = 0;
             maxGeneralGaussianSplatVisibleSplats = 0;
+            generalGaussianSplatTemporalStateCapacity   = 0;
+            generalGaussianSplatCoverageTextureCapacity = 0;
+            generalGaussianSplatProjectedCostChunkCapacity = 0;
+            generalGaussianSplatTemporalStateNeedsReset = false;
+            generalGaussianSplatCoverageTextureNeedsReset = false;
+            generalGaussianSplatDirectPrefix     = false;
+            generalGaussianSplatShStorageLayout  = GpuGaussianSplatShStorageLayout::eMonolithic;
+            resetGeneralGaussianSplatFoveatedClod();
         }
 
         void beginFrame(const GpuSceneDatabase& db, GpuSceneBuildMode buildMode = GpuSceneBuildMode::eCpuDriven)
@@ -144,7 +288,14 @@ namespace vultra::resource
             maxGeneralGaussianSplatDraws         = 0;
             maxGeneralGaussianSplatSourceCount   = 0;
             maxGeneralGaussianSplatPoints        = 0;
+            activeGeneralGaussianSplatPoints     = 0;
             maxGeneralGaussianSplatVisibleSplats = 0;
+            generalGaussianSplatTemporalStateNeedsReset = false;
+            generalGaussianSplatProjectedCostChunkCapacity = 0;
+            generalGaussianSplatDirectPrefix     = false;
+            generalGaussianSplatShStorageLayout  = GpuGaussianSplatShStorageLayout::eMonolithic;
+            generalGaussianSplatEcsptCounterReadbackEnabled = false;
+            resetGeneralGaussianSplatFoveatedClod();
         }
 
         [[nodiscard]] bool isCpuDriven() const { return mode == GpuSceneBuildMode::eCpuDriven; }
@@ -352,17 +503,268 @@ namespace vultra::resource
             ensureIndirectBuffer(rd);
         }
 
-        // maxSourceCount sizes immutable packed raw data, while maxPointCount sizes
-        // the per-frame selected-source indirection consumed by the preprocess pass.
+        // maxSourceCount sizes immutable packed raw data. maxPointCount sizes the
+        // selected-source indirection buffer when the fallback path is active;
+        // directPrefix skips that buffer and consumes a packed-source prefix.
         void setGeneralGaussianSplatCaps(uint32_t maxDrawCount,
                                          uint32_t maxSourceCount,
                                          uint32_t maxPointCount,
-                                         uint32_t maxVisibleSplatCount)
+                                         uint32_t activePointCount,
+                                         uint32_t maxVisibleSplatCount,
+                                         bool     directPrefix = false)
         {
             maxGeneralGaussianSplatDraws         = maxDrawCount;
             maxGeneralGaussianSplatSourceCount   = maxSourceCount;
             maxGeneralGaussianSplatPoints        = maxPointCount;
+            generalGaussianSplatDirectPrefix     = directPrefix;
+            const uint32_t activeCapacity        = directPrefix ? maxSourceCount : maxPointCount;
+            activeGeneralGaussianSplatPoints     = std::min(activePointCount, activeCapacity);
             maxGeneralGaussianSplatVisibleSplats = maxVisibleSplatCount;
+        }
+
+        void setGeneralGaussianSplatFoveatedClod(bool enabled,
+                                                 bool layeredCompositeEnabled,
+                                                 bool coverageCompensationEnabled,
+                                                 glm::vec2 gaze,
+                                                 glm::vec2 ringDegrees,
+                                                 glm::vec3 ringLevels,
+                                                 glm::vec3 resolutionScales,
+                                                 float     transitionDegrees,
+                                                 uint32_t  coverageGuardMode,
+                                                 float     coverageProtectionDegrees,
+                                                 float     coverageGuardBudgetRatio,
+                                                 glm::vec3 coverageGuardMinLevels,
+                                                 uint32_t  coverageGuardRiskSectors,
+                                                 uint32_t  distribution,
+                                                 float     continuousTheta0Degrees,
+                                                 float     continuousAlpha,
+                                                 float     continuousMinLevel,
+                                                 float     temporalPeripheralScale,
+                                                 bool      temporalHysteresisEnabled,
+                                                 bool      boundarySmoothingEnabled,
+                                                 uint32_t  temporalResidencyFrames,
+                                                 float     temporalHysteresisRatio,
+                                                 float     boundarySmoothingRatio,
+                                                 bool      shLodEnabled,
+                                                 bool      shSmoothSuppressionEnabled,
+                                                 bool      peripheralTemporalFilterEnabled,
+                                                 float     peripheralTemporalFilterOuterDegrees,
+                                                 float     peripheralTemporalFilterLambdaScale,
+                                                 float     peripheralTemporalFilterRejectionThreshold,
+                                                 float     peripheralTemporalFilterClampRadius,
+                                                 glm::uvec3 shLodDegrees,
+                                                 uint32_t  shLodGuardMode,
+                                                 float     shLodGuardThresholdMid,
+                                                 float     shLodGuardThresholdHigh)
+        {
+            generalGaussianSplatFoveatedClodEnabled              = enabled;
+            generalGaussianSplatFoveatedLayeredCompositeEnabled = layeredCompositeEnabled;
+            generalGaussianSplatFoveatedCoverageCompensationEnabled =
+                coverageCompensationEnabled;
+            generalGaussianSplatFoveatedScoreSelected = false;
+            generalGaussianSplatFoveatedTemporalHysteresisEnabled =
+                temporalHysteresisEnabled;
+            generalGaussianSplatFoveatedBoundarySmoothingEnabled =
+                boundarySmoothingEnabled;
+            generalGaussianSplatFoveatedGaze                     = gaze;
+            generalGaussianSplatFoveatedRingDegrees              = ringDegrees;
+            generalGaussianSplatFoveatedRingLevels               = ringLevels;
+            generalGaussianSplatFoveatedResolutionScales         = resolutionScales;
+            generalGaussianSplatFoveatedTransitionDegrees        = transitionDegrees;
+            generalGaussianSplatFoveatedCoverageGuardMode        = coverageGuardMode;
+            generalGaussianSplatFoveatedCoverageProtectionDegrees =
+                coverageProtectionDegrees;
+            generalGaussianSplatFoveatedCoverageGuardBudgetRatio =
+                coverageGuardBudgetRatio;
+            generalGaussianSplatFoveatedCoverageGuardMinLevels =
+                coverageGuardMinLevels;
+            generalGaussianSplatFoveatedCoverageGuardRiskSectors =
+                coverageGuardRiskSectors & 0x7u;
+            generalGaussianSplatFoveatedTemporalResidencyFrames  = temporalResidencyFrames;
+            generalGaussianSplatFoveatedTemporalHysteresisRatio  = temporalHysteresisRatio;
+            generalGaussianSplatFoveatedBoundarySmoothingRatio   = boundarySmoothingRatio;
+            generalGaussianSplatFoveatedDistribution             = distribution;
+            generalGaussianSplatFoveatedContinuousTheta0Degrees  = std::max(continuousTheta0Degrees, 1e-4f);
+            generalGaussianSplatFoveatedContinuousAlpha          = std::max(continuousAlpha, 0.0f);
+            generalGaussianSplatFoveatedContinuousMinLevel       =
+                std::clamp(continuousMinLevel, 0.0f, 1.0f);
+            generalGaussianSplatFoveatedTemporalPeripheralScale  =
+                std::max(temporalPeripheralScale, 0.0f);
+            generalGaussianSplatFoveatedShLodEnabled             = shLodEnabled;
+            generalGaussianSplatFoveatedShSmoothSuppressionEnabled =
+                shSmoothSuppressionEnabled;
+            generalGaussianSplatPeripheralTemporalFilterEnabled =
+                peripheralTemporalFilterEnabled;
+            generalGaussianSplatPeripheralTemporalFilterOuterDegrees =
+                std::max(peripheralTemporalFilterOuterDegrees, generalGaussianSplatFoveatedRingDegrees.y + 1.0f);
+            generalGaussianSplatPeripheralTemporalFilterLambdaScale =
+                std::clamp(peripheralTemporalFilterLambdaScale, 0.0f, 1.0f);
+            generalGaussianSplatPeripheralTemporalFilterRejectionThreshold =
+                std::max(peripheralTemporalFilterRejectionThreshold, 1e-4f);
+            generalGaussianSplatPeripheralTemporalFilterClampRadius =
+                std::max(peripheralTemporalFilterClampRadius, 0.0f);
+            generalGaussianSplatFoveatedShLodDegrees             = glm::clamp(shLodDegrees,
+                                                                               glm::uvec3 {0u},
+                                                                               glm::uvec3 {3u});
+            generalGaussianSplatFoveatedShLodGuardMode           = std::min(shLodGuardMode, 3u);
+            generalGaussianSplatFoveatedShLodGuardThresholdMid   = std::max(shLodGuardThresholdMid, 0.0f);
+            generalGaussianSplatFoveatedShLodGuardThresholdHigh  =
+                std::max(shLodGuardThresholdHigh, generalGaussianSplatFoveatedShLodGuardThresholdMid);
+        }
+
+        void setGeneralGaussianSplatShaderAntiPop(uint32_t mode,
+                                                  uint32_t hashSeed,
+                                                  float    rampWidth,
+                                                  float    guardThreshold,
+                                                  float    guardFloor,
+                                                  uint32_t pKeepCurve,
+                                                  float    prefixRatio = -1.0f,
+                                                  uint32_t normalizeMode = 0u,
+                                                  float    normalizeStrength = 1.0f,
+                                                  float    normalizeClampMin = 0.75f,
+                                                  float    normalizeClampMax = 1.15f,
+                                                  float    normalizeFactor = 1.0f)
+        {
+            generalGaussianSplatShaderAntiPopMode = std::min(mode, 9u);
+            generalGaussianSplatShaderAntiPopHashSeed = hashSeed;
+            generalGaussianSplatShaderAntiPopRampWidth = std::clamp(rampWidth, 0.0f, 1.0f);
+            generalGaussianSplatShaderAntiPopGuardThreshold = std::clamp(guardThreshold, 0.0f, 1.0f);
+            generalGaussianSplatShaderAntiPopGuardFloor = std::clamp(guardFloor, 0.0f, 1.0f);
+            generalGaussianSplatShaderAntiPopPKeepCurve = std::min(pKeepCurve, 4u);
+            generalGaussianSplatShaderAntiPopPrefixRatio = prefixRatio;
+            generalGaussianSplatShaderAntiPopNormalizeMode = std::min(normalizeMode, 2u);
+            generalGaussianSplatShaderAntiPopNormalizeStrength = std::clamp(normalizeStrength, 0.0f, 1.0f);
+            generalGaussianSplatShaderAntiPopNormalizeClampMin = std::max(normalizeClampMin, 0.0f);
+            generalGaussianSplatShaderAntiPopNormalizeClampMax =
+                std::max(normalizeClampMax, generalGaussianSplatShaderAntiPopNormalizeClampMin);
+            generalGaussianSplatShaderAntiPopNormalizeFactor =
+                std::clamp(normalizeFactor,
+                           generalGaussianSplatShaderAntiPopNormalizeClampMin,
+                           generalGaussianSplatShaderAntiPopNormalizeClampMax);
+        }
+
+        void setGeneralGaussianSplatCoverageStableRelease(uint32_t flags,
+                                                          uint32_t tileGridX,
+                                                          uint32_t tileGridY,
+                                                          uint32_t frameIndex,
+                                                          float    releaseLambda,
+                                                          float    dMin,
+                                                          float    sigmaMax,
+                                                          float    releaseEpsilon)
+        {
+            constexpr uint32_t kCoverageReleaseTextureFloorFlag = 32u;
+            generalGaussianSplatCoverageStableReleaseFlags = flags;
+            const bool textureFloor = (flags & kCoverageReleaseTextureFloorFlag) != 0u;
+            generalGaussianSplatCoverageStableReleaseTileGridX =
+                textureFloor ? std::clamp(tileGridX, 1u, 1024u) : std::clamp(tileGridX, 1u, 32u);
+            generalGaussianSplatCoverageStableReleaseTileGridY =
+                textureFloor ? std::clamp(tileGridY, 1u, 1024u) : std::clamp(tileGridY, 1u, 16u);
+            generalGaussianSplatCoverageStableReleaseFrameIndex = frameIndex;
+            generalGaussianSplatCoverageStableReleaseLambda = std::clamp(releaseLambda, 0.0f, 1.0f);
+            generalGaussianSplatCoverageStableReleaseDMin = std::max(dMin, 0.0f);
+            generalGaussianSplatCoverageStableReleaseSigmaMax = std::max(sigmaMax, 0.0f);
+            generalGaussianSplatCoverageStableReleaseReleaseEpsilon = std::max(releaseEpsilon, 0.0f);
+        }
+
+        void setGeneralGaussianSplatCoverageTextureFloor(float strength, float historyBeta, uint32_t updateInterval)
+        {
+            generalGaussianSplatCoverageTextureStrength = std::clamp(strength, 0.0f, 1.0f);
+            generalGaussianSplatCoverageTextureHistoryBeta = std::clamp(historyBeta, 0.0f, 1.0f);
+            generalGaussianSplatCoverageTextureUpdateInterval = std::max(updateInterval, 1u);
+        }
+
+        void setGeneralGaussianSplatDelayedGuideTemporalReleaseCost(uint32_t policy,
+                                                                    float    capRatio,
+                                                                    float    riskThreshold,
+                                                                    float    footprintDecayScale,
+                                                                    float    largeFootprintPx)
+        {
+            generalGaussianSplatDelayedGuideTemporalReleasePolicy = std::min(policy, 4u);
+            generalGaussianSplatDelayedGuideTemporalReleaseCapRatio = std::clamp(capRatio, 0.0f, 1.0f);
+            generalGaussianSplatDelayedGuideTemporalRiskThreshold = std::clamp(riskThreshold, 0.0f, 1.0f);
+            generalGaussianSplatDelayedGuideTemporalFootprintDecayScale =
+                std::clamp(footprintDecayScale, 0.0f, 1.0f);
+            generalGaussianSplatDelayedGuideTemporalLargeFootprintPx = std::max(largeFootprintPx, 1.0f);
+        }
+
+        void setGeneralGaussianSplatGazeAnchorCrossfade(uint32_t  flags,
+                                                        glm::vec2 oldGaze,
+                                                        glm::vec2 newGaze,
+                                                        float     fadePhase,
+                                                        float     transitionBudgetRatio,
+                                                        uint32_t  fadeFrames,
+                                                        uint32_t  minUpdateFrames)
+        {
+            generalGaussianSplatGazeAnchorFlags = flags;
+            generalGaussianSplatGazeAnchorOldGaze = glm::clamp(oldGaze, glm::vec2 {0.0f}, glm::vec2 {1.0f});
+            generalGaussianSplatGazeAnchorNewGaze = glm::clamp(newGaze, glm::vec2 {0.0f}, glm::vec2 {1.0f});
+            generalGaussianSplatGazeAnchorFadePhase = std::clamp(fadePhase, 0.0f, 1.0f);
+            generalGaussianSplatGazeAnchorTransitionBudgetRatio = transitionBudgetRatio;
+            generalGaussianSplatGazeAnchorAux0 = 0.0f;
+            generalGaussianSplatGazeAnchorAux1 = 0.0f;
+            generalGaussianSplatGazeAnchorFadeFrames = std::max(fadeFrames, 1u);
+            generalGaussianSplatGazeAnchorMinUpdateFrames = minUpdateFrames;
+        }
+
+        void setGeneralGaussianSplatEccentricityStochasticTransition(uint32_t  flags,
+                                                                      glm::vec2 oldGaze,
+                                                                      glm::vec2 newGaze,
+                                                                      float     fadePhase,
+                                                                      float     protectOldFoveaDegrees,
+                                                                      float     protectNewFoveaDegrees,
+                                                                      float     boundaryBandDegrees,
+                                                                      uint32_t  fadeFrames)
+        {
+            generalGaussianSplatGazeAnchorFlags = flags;
+            generalGaussianSplatGazeAnchorOldGaze = glm::clamp(oldGaze, glm::vec2 {0.0f}, glm::vec2 {1.0f});
+            generalGaussianSplatGazeAnchorNewGaze = glm::clamp(newGaze, glm::vec2 {0.0f}, glm::vec2 {1.0f});
+            generalGaussianSplatGazeAnchorFadePhase = std::clamp(fadePhase, 0.0f, 1.0f);
+            generalGaussianSplatGazeAnchorTransitionBudgetRatio = std::max(protectOldFoveaDegrees, -1.0f);
+            generalGaussianSplatGazeAnchorAux0 = std::max(protectNewFoveaDegrees, -1.0f);
+            generalGaussianSplatGazeAnchorAux1 = std::max(boundaryBandDegrees, 0.0f);
+            generalGaussianSplatGazeAnchorFadeFrames = std::max(fadeFrames, 1u);
+            generalGaussianSplatGazeAnchorMinUpdateFrames = 0u;
+        }
+
+        void resetGeneralGaussianSplatFoveatedClod()
+        {
+            setGeneralGaussianSplatFoveatedClod(false,
+                                                false,
+                                                false,
+                                                glm::vec2 {0.5f, 0.5f},
+                                                glm::vec2 {12.0f, 32.0f},
+                                                glm::vec3 {1.0f, 0.40f, 0.15f},
+                                                glm::vec3 {1.0f, 0.75f, 0.50f},
+                                                8.0f,
+                                                1u,
+                                                0.0f,
+                                                0.05f,
+                                                glm::vec3 {0.75f, 0.45f, 0.15f},
+                                                0x7u,
+                                                2u,
+                                                24.0f,
+                                                2.0f,
+                                                0.12f,
+                                                0.0f,
+                                                true,
+                                                true,
+                                                6u,
+                                                0.25f,
+                                                0.18f,
+                                                false,
+                                                false,
+                                                false,
+                                                56.0f,
+                                                0.85f,
+                                                0.18f,
+                                                0.20f,
+                                                glm::uvec3 {3u, 3u, 3u},
+                                                0u,
+                                                0.05f,
+                                                0.20f);
+            setGeneralGaussianSplatShaderAntiPop(0u, 0u, 0.05f, 0.0f, 0.0f, 0u);
+            setGeneralGaussianSplatCoverageStableRelease(0x7u, 16u, 8u, 0u, 0.7743f, 4.0f, 0.65f, 1e-4f);
+            setGeneralGaussianSplatDelayedGuideTemporalReleaseCost(0u, 0.12f, 0.35f, 0.55f, 48.0f);
         }
 
         void ensureGeneralGaussianSplatBuffers(rhi::RenderDevice& rd)
@@ -388,6 +790,17 @@ namespace vultra::resource
                     generalGaussianSplatPackedSourceBuffer =
                         createRef<rhi::StorageBuffer>(rd.createStorageBuffer(packedBytes));
                 }
+
+                const uint64_t temporalStateBytes =
+                    static_cast<uint64_t>(maxGeneralGaussianSplatSourceCount) * sizeof(uint32_t);
+                if (!generalGaussianSplatTemporalStateBuffer ||
+                    static_cast<uint64_t>(generalGaussianSplatTemporalStateBuffer->getSize()) < temporalStateBytes)
+                {
+                    generalGaussianSplatTemporalStateBuffer =
+                        createRef<rhi::StorageBuffer>(rd.createStorageBuffer(temporalStateBytes));
+                    generalGaussianSplatTemporalStateNeedsReset = true;
+                }
+                generalGaussianSplatTemporalStateCapacity = maxGeneralGaussianSplatSourceCount;
             }
 
             if (maxGeneralGaussianSplatPoints > 0u)
@@ -405,10 +818,39 @@ namespace vultra::resource
             if (maxGeneralGaussianSplatVisibleSplats == 0u)
                 return;
 
+            {
+                constexpr uint32_t kCoverageReleaseTextureFloorFlag = 32u;
+                const bool coverageTextureFloor =
+                    (generalGaussianSplatCoverageStableReleaseFlags & kCoverageReleaseTextureFloorFlag) != 0u;
+                const uint32_t coverageWidth =
+                    coverageTextureFloor ?
+                        std::clamp(generalGaussianSplatCoverageStableReleaseTileGridX, 1u, 1024u) :
+                        1u;
+                const uint32_t coverageHeight =
+                    coverageTextureFloor ?
+                        std::clamp(generalGaussianSplatCoverageStableReleaseTileGridY, 1u, 1024u) :
+                        1u;
+                const uint32_t coverageTexels = coverageWidth * coverageHeight;
+                const uint64_t coverageBytes =
+                    static_cast<uint64_t>(coverageTexels) * 4ull * sizeof(uint32_t);
+                if (!generalGaussianSplatCoverageTextureBuffer ||
+                    static_cast<uint64_t>(generalGaussianSplatCoverageTextureBuffer->getSize()) < coverageBytes ||
+                    generalGaussianSplatCoverageTextureCapacity != coverageTexels)
+                {
+                    generalGaussianSplatCoverageTextureBuffer =
+                        createRef<rhi::StorageBuffer>(rd.createStorageBuffer(coverageBytes));
+                    generalGaussianSplatCoverageTextureCapacity = coverageTexels;
+                    generalGaussianSplatCoverageTextureNeedsReset = true;
+                }
+            }
+
             const uint64_t visibleBytes = static_cast<uint64_t>(maxGeneralGaussianSplatVisibleSplats) *
                                           sizeof(GpuGeneralGaussianSplatVisibleSplat);
+            // vk_radix_sort may bind a small implementation-side sentinel tail for
+            // key/value buffers, so keep the external sort inputs padded beyond
+            // the visible splat cap.
             const uint64_t sortBytes =
-                static_cast<uint64_t>(maxGeneralGaussianSplatVisibleSplats) * sizeof(uint32_t);
+                (static_cast<uint64_t>(maxGeneralGaussianSplatVisibleSplats) + 3ull) * sizeof(uint32_t);
 
             if (!generalGaussianSplatVisibleSplatBuffer ||
                 static_cast<uint64_t>(generalGaussianSplatVisibleSplatBuffer->getSize()) < visibleBytes)
@@ -435,6 +877,24 @@ namespace vultra::resource
                     createRef<rhi::StorageBuffer>(rd.createStorageBuffer(sizeof(uint32_t)));
             }
 
+            constexpr uint64_t kEcsptCounterBytes = sizeof(uint32_t) * 4096ull;
+            if (!generalGaussianSplatEcsptCounterBuffer ||
+                static_cast<uint64_t>(generalGaussianSplatEcsptCounterBuffer->getSize()) < kEcsptCounterBytes)
+            {
+                generalGaussianSplatEcsptCounterBuffer =
+                    createRef<rhi::StorageBuffer>(
+                        rd.createStorageBufferWithUsage(kEcsptCounterBytes, rhi::BufferUsage::eTransferSrc));
+            }
+            if (!generalGaussianSplatEcsptCounterReadbackBuffer ||
+                static_cast<uint64_t>(generalGaussianSplatEcsptCounterReadbackBuffer->getSize()) < kEcsptCounterBytes)
+            {
+                generalGaussianSplatEcsptCounterReadbackBuffer =
+                    createRef<rhi::StorageBuffer>(
+                        rd.createStorageBufferWithUsage(kEcsptCounterBytes,
+                                                        rhi::BufferUsage::eTransferDst,
+                                                        rhi::AllocationHints::eRandomAccess));
+            }
+
             constexpr uint64_t kDispatchArgsBytes = sizeof(uint32_t) * 4ull;
             if (!generalGaussianSplatDispatchArgsBuffer ||
                 static_cast<uint64_t>(generalGaussianSplatDispatchArgsBuffer->getSize()) < kDispatchArgsBytes)
@@ -455,6 +915,35 @@ namespace vultra::resource
                 generalGaussianSplatSorter = rd.createRadixSorter(maxGeneralGaussianSplatVisibleSplats);
             }
 
+            if (generalGaussianSplatFoveatedLayeredCompositeEnabled)
+            {
+                for (auto& buffer : generalGaussianSplatFoveatedVisibleSplatBuffers)
+                {
+                    if (!buffer || static_cast<uint64_t>(buffer->getSize()) < visibleBytes)
+                        buffer = createRef<rhi::StorageBuffer>(rd.createStorageBuffer(visibleBytes));
+                }
+                for (auto& buffer : generalGaussianSplatFoveatedSortKeyBuffers)
+                {
+                    if (!buffer || static_cast<uint64_t>(buffer->getSize()) < sortBytes)
+                        buffer = createRef<rhi::StorageBuffer>(rd.createStorageBuffer(sortBytes));
+                }
+                for (auto& buffer : generalGaussianSplatFoveatedSortIndexBuffers)
+                {
+                    if (!buffer || static_cast<uint64_t>(buffer->getSize()) < sortBytes)
+                        buffer = createRef<rhi::StorageBuffer>(rd.createStorageBuffer(sortBytes));
+                }
+                for (auto& buffer : generalGaussianSplatFoveatedVisibleCountBuffers)
+                {
+                    if (!buffer || static_cast<uint64_t>(buffer->getSize()) < sizeof(uint32_t))
+                        buffer = createRef<rhi::StorageBuffer>(rd.createStorageBuffer(sizeof(uint32_t)));
+                }
+                for (auto& buffer : generalGaussianSplatFoveatedIndirectBuffers)
+                {
+                    if (!buffer.has_value() || buffer->getCapacity() < 1u)
+                        buffer = rd.createDrawIndirectBufferByCount(1u, rhi::DrawIndirectType::eNonIndexed);
+                }
+            }
+
             if (generalGaussianSplatSorter.has_value() && static_cast<bool>(*generalGaussianSplatSorter))
             {
                 const auto req = generalGaussianSplatSorter->getKeyValueStorageRequirements();
@@ -466,6 +955,30 @@ namespace vultra::resource
                         rd.createStorageBufferWithUsage(req.size, req.usage));
                 }
             }
+        }
+
+        void ensureGeneralGaussianSplatProjectedCostBuffers(rhi::RenderDevice& rd, const uint32_t chunkCount)
+        {
+            if (chunkCount == 0u)
+                return;
+
+            constexpr uint64_t kProjectedCostChunkRecordBytes = 32ull;
+            const uint64_t bytes = static_cast<uint64_t>(chunkCount) * kProjectedCostChunkRecordBytes;
+            if (!generalGaussianSplatProjectedCostChunkBuffer ||
+                static_cast<uint64_t>(generalGaussianSplatProjectedCostChunkBuffer->getSize()) < bytes)
+            {
+                generalGaussianSplatProjectedCostChunkBuffer =
+                    createRef<rhi::StorageBuffer>(rd.createStorageBufferWithUsage(bytes, rhi::BufferUsage::eTransferSrc));
+            }
+            if (!generalGaussianSplatProjectedCostReadbackBuffer ||
+                static_cast<uint64_t>(generalGaussianSplatProjectedCostReadbackBuffer->getSize()) < bytes)
+            {
+                generalGaussianSplatProjectedCostReadbackBuffer =
+                    createRef<rhi::StorageBuffer>(rd.createStorageBufferWithUsage(bytes,
+                                                                                  rhi::BufferUsage::eTransferDst,
+                                                                                  rhi::AllocationHints::eRandomAccess));
+            }
+            generalGaussianSplatProjectedCostChunkCapacity = chunkCount;
         }
 
     };

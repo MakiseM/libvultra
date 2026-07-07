@@ -1,4 +1,4 @@
--- -- Shader compile task
+﻿-- -- Shader compile task
 -- task("shader_task")
 --     on_run(function ()
 --         import("core.project.config")
@@ -433,44 +433,19 @@ task("shader_task")
         end
 
         if rebuild_header then
-            local data_vshlib_highend =
-                io.readfile(vshlib_highend, {encoding="binary"})
-            local data_vshlib_compatibility =
-                io.readfile(vshlib_compatibility, {encoding="binary"})
-            local data_vshweblib_compatibility =
-                io.readfile(vshweblib_compatibility, {encoding="binary"})
-
             local f =
                 io.open(header, "w")
 
             f:write("// auto-generated\n")
             f:write("#pragma once\n\n")
+            f:write("#include <cstddef>\n")
             f:write("#include <cstdint>\n\n")
-
-            local function write_embedded_blob(symbol_name, data)
-                f:write(string.format("inline constexpr uint8_t %s[] = {\n", symbol_name))
-                for i = 1, #data do
-                    if i % 12 == 1 then
-                        f:write("    ")
-                    end
-
-                    f:write(string.format("0x%02X", data:byte(i)))
-
-                    if i < #data then
-                        f:write(",")
-                    end
-
-                    if i % 12 == 0 then
-                        f:write("\n")
-                    end
-                end
-                f:write("\n};\n\n")
-                f:write(string.format("inline constexpr size_t %s_size = %d;\n\n", symbol_name, #data))
-            end
-
-            write_embedded_blob("builtin_shaders_highend_vshlib", data_vshlib_highend)
-            write_embedded_blob("builtin_shaders_compatibility_vshlib", data_vshlib_compatibility)
-            write_embedded_blob("builtin_shaders_compatibility_web_vshweblib", data_vshweblib_compatibility)
+            f:write("inline constexpr uint8_t builtin_shaders_highend_vshlib[] = {};\n")
+            f:write("inline constexpr size_t builtin_shaders_highend_vshlib_size = 0;\n\n")
+            f:write("inline constexpr uint8_t builtin_shaders_compatibility_vshlib[] = {};\n")
+            f:write("inline constexpr size_t builtin_shaders_compatibility_vshlib_size = 0;\n\n")
+            f:write("inline constexpr uint8_t builtin_shaders_compatibility_web_vshweblib[] = {};\n")
+            f:write("inline constexpr size_t builtin_shaders_compatibility_web_vshweblib_size = 0;\n")
 
             f:close()
         end
@@ -647,7 +622,7 @@ task_end()
 if is_plat("android") then
     add_requires("vshadersystem v0.6.2", { configs = { debug = is_mode("debug") }})
 else
-    add_requires("vshadersystem v0.8.2", { configs = { debug = is_mode("debug") }})
+    add_requires("vshadersystem v0.8.3", { configs = { debug = is_mode("debug") }})
 end
 
 target("vultra_builtin_assets")

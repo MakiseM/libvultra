@@ -1,6 +1,9 @@
 #pragma once
 
 #include "vultra/function/framegraph/framegraph_data_registry.hpp"
+#include "vultra/function/resource/gpu_scene_view.hpp"
+
+#include <array>
 
 #include <vbase/core/hash.hpp>
 
@@ -63,9 +66,60 @@ namespace vultra
     // set = 0, binding = 22
     constexpr FrameGraphResourceKey kResKey_GeneralGaussianSplatShBuffer {
         .id = vbase::hashLiteral("GeneralGaussianSplatShBuffer")};
+    // set = 0, binding = 50
+    constexpr FrameGraphResourceKey kResKey_GeneralGaussianSplatEcsptCounterBuffer {
+        .id = vbase::hashLiteral("GeneralGaussianSplatEcsptCounterBuffer")};
+    // set = 0, binding = 51
+    constexpr FrameGraphResourceKey kResKey_GeneralGaussianSplatCoverageTextureBuffer {
+        .id = vbase::hashLiteral("GeneralGaussianSplatCoverageTextureBuffer")};
+    // set = 0, binding = 47
+    constexpr FrameGraphResourceKey kResKey_GeneralGaussianSplatShL1Buffer {
+        .id = vbase::hashLiteral("GeneralGaussianSplatShL1Buffer")};
+    // set = 0, binding = 48
+    constexpr FrameGraphResourceKey kResKey_GeneralGaussianSplatShL2Buffer {
+        .id = vbase::hashLiteral("GeneralGaussianSplatShL2Buffer")};
+    // set = 0, binding = 49
+    constexpr FrameGraphResourceKey kResKey_GeneralGaussianSplatShL3Buffer {
+        .id = vbase::hashLiteral("GeneralGaussianSplatShL3Buffer")};
+    // set = 0, binding = 28
+    constexpr FrameGraphResourceKey kResKey_GeneralGaussianSplatShEnergyMetadataBuffer {
+        .id = vbase::hashLiteral("GeneralGaussianSplatShEnergyMetadataBuffer")};
     // set = 0, binding = 27
     constexpr FrameGraphResourceKey kResKey_GeneralGaussianSplatSelectedSourceBuffer {
         .id = vbase::hashLiteral("GeneralGaussianSplatSelectedSourceBuffer")};
+    // set = 0, binding = 46
+    constexpr FrameGraphResourceKey kResKey_GeneralGaussianSplatTemporalStateBuffer {
+        .id = vbase::hashLiteral("GeneralGaussianSplatTemporalStateBuffer")};
+    // set = 0, bindings = 31, 32, 33
+    inline constexpr std::array<FrameGraphResourceKey, resource::kGeneralGaussianSplatFoveatedLayerCount>
+        kResKey_GeneralGaussianSplatFoveatedVisibleSplatBuffers {
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedFoveaVisibleSplatBuffer")},
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedMidVisibleSplatBuffer")},
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedOuterVisibleSplatBuffer")}};
+    // set = 0, bindings = 34, 35, 36
+    inline constexpr std::array<FrameGraphResourceKey, resource::kGeneralGaussianSplatFoveatedLayerCount>
+        kResKey_GeneralGaussianSplatFoveatedSortKeyBuffers {
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedFoveaSortKeyBuffer")},
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedMidSortKeyBuffer")},
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedOuterSortKeyBuffer")}};
+    // set = 0, bindings = 37, 38, 39
+    inline constexpr std::array<FrameGraphResourceKey, resource::kGeneralGaussianSplatFoveatedLayerCount>
+        kResKey_GeneralGaussianSplatFoveatedSortIndexBuffers {
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedFoveaSortIndexBuffer")},
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedMidSortIndexBuffer")},
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedOuterSortIndexBuffer")}};
+    // set = 0, bindings = 40, 41, 42
+    inline constexpr std::array<FrameGraphResourceKey, resource::kGeneralGaussianSplatFoveatedLayerCount>
+        kResKey_GeneralGaussianSplatFoveatedVisibleCountBuffers {
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedFoveaVisibleCountBuffer")},
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedMidVisibleCountBuffer")},
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedOuterVisibleCountBuffer")}};
+    // set = 0, bindings = 43, 44, 45
+    inline constexpr std::array<FrameGraphResourceKey, resource::kGeneralGaussianSplatFoveatedLayerCount>
+        kResKey_GeneralGaussianSplatFoveatedIndirectBuffers {
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedFoveaIndirectBuffer")},
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedMidIndirectBuffer")},
+        FrameGraphResourceKey {.id = vbase::hashLiteral("GeneralGaussianSplatFoveatedOuterIndirectBuffer")}};
     // set = 0, binding = 24
     constexpr FrameGraphResourceKey kResKey_VisibleInstanceBuffer {.id = vbase::hashLiteral("VisibleInstanceBuffer")};
     // set = 0, binding = 25

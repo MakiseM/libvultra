@@ -88,23 +88,43 @@ namespace vultra
                 if (XR_FAILED(result))
                 {
                     VULTRA_CORE_ERROR("[EyeTracker] Failed to sync action set");
+                    m_GazePoseValid = false;
                     return false;
                 }
 
                 XrActionStatePose    actionStatePose {.type = XR_TYPE_ACTION_STATE_POSE};
                 XrActionStateGetInfo getActionStateInfo {.type = XR_TYPE_ACTION_STATE_GET_INFO};
                 getActionStateInfo.action = m_UserIntentAction;
-                OPENXR_CHECK(xrGetActionStatePose(m_Session, &getActionStateInfo, &actionStatePose),
-                             "Failed to get action state pose");
+                result = xrGetActionStatePose(m_Session, &getActionStateInfo, &actionStatePose);
+                if (XR_FAILED(result))
+                {
+                    VULTRA_CORE_WARN("[EyeTracker] Failed to get action state pose: {}",
+                                     xrutils::resultToString(m_XrInstance, result));
+                    m_GazePoseValid = false;
+                    return false;
+                }
 
                 if (actionStatePose.isActive)
                 {
                     XrEyeGazeSampleTimeEXT eyeGazeSampleTime {.type = XR_TYPE_EYE_GAZE_SAMPLE_TIME_EXT};
                     XrSpaceLocation        gazeLocation {.type = XR_TYPE_SPACE_LOCATION, .next = &eyeGazeSampleTime};
-                    OPENXR_CHECK(xrLocateSpace(m_GazeActionSpace, space, time, &gazeLocation),
-                                 "Failed to locate gaze location");
+                    result = xrLocateSpace(m_GazeActionSpace, space, time, &gazeLocation);
+                    if (XR_FAILED(result))
+                    {
+                        VULTRA_CORE_WARN("[EyeTracker] Failed to locate gaze location: {}",
+                                         xrutils::resultToString(m_XrInstance, result));
+                        m_GazePoseValid = false;
+                        return false;
+                    }
 
                     m_GazePose = gazeLocation.pose;
+                    m_GazePoseValid =
+                        (gazeLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
+                        (gazeLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0;
+                }
+                else
+                {
+                    m_GazePoseValid = false;
                 }
 
                 return true;

@@ -6,6 +6,8 @@
 #include <renderdoc_app.h>
 
 #include <filesystem>
+#include <cstdlib>
+#include <string>
 
 #ifdef WIN32
 #include <Windows.h>
@@ -18,12 +20,35 @@ namespace vultra
     namespace
     {
         std::filesystem::path getCaptureRoot() { return vbase::executable_dir(); }
+
+        std::filesystem::path getRenderDocDllPath()
+        {
+            if (const char* env = std::getenv("VULTRA_RENDERDOC_DLL"); env && env[0] != '\0')
+                return std::filesystem::path {env};
+            if (std::filesystem::exists("D:/tools/RenderDoc/renderdoc.dll"))
+                return "D:/tools/RenderDoc/renderdoc.dll";
+            return "C:/Program Files/RenderDoc/renderdoc.dll";
+        }
+
+        std::filesystem::path getRenderDocCaptureTemplate()
+        {
+            if (const char* env = std::getenv("VULTRA_RENDERDOC_CAPTURE_TEMPLATE");
+                env && env[0] != '\0')
+                return std::filesystem::path {env};
+            return getCaptureRoot() / "captures" / "myframe";
+        }
     } // namespace
 
     RenderDocAPI::RenderDocAPI(bool enable)
     {
 #ifdef VULTRA_ENABLE_RENDERDOC
         VULTRA_CORE_TRACE("[Profiling] Initializing RenderDoc API...");
+        if (const char* disableEnv = std::getenv("VULTRA_RENDERDOC_DISABLE");
+            disableEnv && disableEnv[0] != '\0' && disableEnv[0] != '0')
+        {
+            VULTRA_CORE_TRACE("[Profiling] RenderDoc API is disabled by VULTRA_RENDERDOC_DISABLE.");
+            return;
+        }
         if (!enable)
         {
             VULTRA_CORE_TRACE("[Profiling] RenderDoc API is disabled by user.");
@@ -105,12 +130,13 @@ namespace vultra
         }
     }
 
-    void RenderDocAPI::endFrameCapture() const
+    bool RenderDocAPI::endFrameCapture() const
     {
         if (m_RenderDocAPI)
         {
-            m_RenderDocAPI->EndFrameCapture(nullptr, nullptr);
+            return m_RenderDocAPI->EndFrameCapture(nullptr, nullptr) != 0;
         }
+        return false;
     }
 
     void RenderDocAPI::setCaptureFilePathTemplate(const std::string_view path) const
@@ -171,6 +197,33 @@ namespace vultra
         return 0;
     }
 
+    std::string RenderDocAPI::getCapturePath(uint32_t index) const
+    {
+        if (!m_RenderDocAPI)
+        {
+            return {};
+        }
+
+        uint32_t pathLength = 0;
+        uint64_t timestamp  = 0;
+        if (m_RenderDocAPI->GetCapture(index, nullptr, &pathLength, &timestamp) == 0u || pathLength == 0u)
+        {
+            return {};
+        }
+
+        std::string path(pathLength, '\0');
+        if (m_RenderDocAPI->GetCapture(index, path.data(), &pathLength, &timestamp) == 0u)
+        {
+            return {};
+        }
+
+        if (!path.empty() && path.back() == '\0')
+        {
+            path.pop_back();
+        }
+        return path;
+    }
+
     bool RenderDocAPI::loadDLL()
     {
         if (m_IsAvailable)
@@ -179,7 +232,8 @@ namespace vultra
         }
 
 #ifdef _WIN32
-        if (m_Module = LoadLibrary("C:/Program Files/RenderDoc/renderdoc.dll"); m_Module)
+        const std::filesystem::path dllPath = getRenderDocDllPath();
+        if (m_Module = LoadLibraryW(dllPath.wstring().c_str()); m_Module)
         {
             RENDERDOC_GetAPI = reinterpret_cast<pRENDERDOC_GetAPI>(
                 GetProcAddress(reinterpret_cast<HMODULE>(m_Module), "RENDERDOC_GetAPI"));
@@ -187,8 +241,7 @@ namespace vultra
         else
         {
             // Handle warning
-            VULTRA_CORE_WARN(
-                "[Profiling] Failed to load RenderDoc DLL. Ensure it is installed and the path is correct.");
+            VULTRA_CORE_WARN("[Profiling] Failed to load RenderDoc DLL at {}", dllPath.string());
             return false;
         }
 #elif defined(__linux__)
@@ -248,9 +301,11 @@ namespace vultra
                 m_RenderDocAPI->SetCaptureOptionU32(eRENDERDOC_Option_DebugOutputMute, 0);
                 m_RenderDocAPI->SetCaptureOptionU32(eRENDERDOC_Option_APIValidation, 1);
 #endif
-                const std::filesystem::path captureRoot = getCaptureRoot() / "captures";
-                std::filesystem::create_directories(captureRoot);
-                m_RenderDocAPI->SetCaptureFilePathTemplate((captureRoot / "myframe").generic_string().c_str());
+                const std::filesystem::path captureTemplate = getRenderDocCaptureTemplate();
+                if (const auto parent = captureTemplate.parent_path(); !parent.empty())
+                    std::filesystem::create_directories(parent);
+                const std::string captureTemplateString = captureTemplate.generic_string();
+                m_RenderDocAPI->SetCaptureFilePathTemplate(captureTemplateString.c_str());
                 m_RenderDocAPI->MaskOverlayBits(eRENDERDOC_Overlay_None, eRENDERDOC_Overlay_None);
             }
         }

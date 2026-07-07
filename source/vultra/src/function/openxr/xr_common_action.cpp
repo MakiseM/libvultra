@@ -36,11 +36,13 @@ namespace vultra
 
         bool XRCommonAction::sync(XrSpace space, XrTime time)
         {
+            bool ok = true;
+
             if (m_Input)
             {
                 if (!m_Input->sync(space, time))
                 {
-                    return false;
+                    ok = false;
                 }
             }
 
@@ -48,11 +50,11 @@ namespace vultra
             {
                 if (!m_EyeTracker->sync(space, time))
                 {
-                    return false;
+                    ok = false;
                 }
             }
 
-            return true;
+            return ok;
         }
     } // namespace openxr
 } // namespace vultra

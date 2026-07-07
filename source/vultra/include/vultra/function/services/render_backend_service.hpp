@@ -6,6 +6,7 @@
 #include "vultra/core/rhi/swapchain.hpp"
 
 #include <glm/mat4x4.hpp>
+#include <glm/vec2.hpp>
 
 #include <vbase/service/service_registry.hpp>
 
@@ -25,6 +26,8 @@ namespace vultra
             rhi::Texture* target {nullptr};
             rhi::Texture* stereoTarget {nullptr};
             rhi::Texture* mirrorTarget {nullptr};
+            bool          gazeValid {false};
+            glm::vec2     gazeUv {0.5f, 0.5f};
         };
 
         SERVICE_REGISTER(IRenderBackendService)

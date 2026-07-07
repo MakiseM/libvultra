@@ -20,6 +20,7 @@
 #include <implot/implot.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -61,30 +62,475 @@ namespace vultra
             {
                 case GaussianSplatBaselineMode::eBaseline:
                     return "Baseline";
-                case GaussianSplatBaselineMode::eConservativeSort:
-                    return "Conservative Sort";
                 case GaussianSplatBaselineMode::eOrderedClod:
                     return "Ordered CLOD";
-                case GaussianSplatBaselineMode::eOrderedClodAndConservativeSort:
-                    return "Ordered CLOD + Sort";
             }
             return "Unknown";
         }
 
-        [[nodiscard]] const char* gaussianSortModeLabel(const GaussianSplatSortMode mode)
+        [[nodiscard]] const char* gaussianFoveatedRenderModeLabel(const GaussianSplatFoveatedRenderMode mode)
         {
             switch (mode)
             {
-                case GaussianSplatSortMode::eClipDepth:
-                    return "Clip Depth";
-                case GaussianSplatSortMode::eDistance:
-                    return "Distance";
-                case GaussianSplatSortMode::eViewDepth:
-                    return "View Depth";
-                case GaussianSplatSortMode::eConservativeDepth:
-                    return "Conservative Depth";
+                case GaussianSplatFoveatedRenderMode::eSinglePass:
+                    return "Single Pass";
+                case GaussianSplatFoveatedRenderMode::eLayeredComposite:
+                    return "Layered Composite";
             }
             return "Unknown";
+        }
+
+        [[nodiscard]] const char* gaussianLodBudgetModeLabel(const GaussianSplatLodBudgetMode mode)
+        {
+            switch (mode)
+            {
+                case GaussianSplatLodBudgetMode::eCount:
+                    return "Count";
+                case GaussianSplatLodBudgetMode::eProjectedTileCost:
+                    return "Projected Tile Cost";
+                case GaussianSplatLodBudgetMode::eFoveatedScore:
+                    return "Foveated Score";
+                case GaussianSplatLodBudgetMode::eCoverageBinScore:
+                    return "Coverage Bin Score";
+            }
+            return "Unknown";
+        }
+
+        [[nodiscard]] const char* gaussianProjectedCostBuildModeLabel(const GaussianProjectedCostBuildMode mode)
+        {
+            switch (mode)
+            {
+                case GaussianProjectedCostBuildMode::eCpu:
+                    return "CPU";
+                case GaussianProjectedCostBuildMode::eGpuSync:
+                    return "GPU Sync";
+            }
+            return "Unknown";
+        }
+
+        [[nodiscard]] const char* gaussianFoveatedCoverageGuardModeLabel(
+            const GaussianSplatFoveatedCoverageGuardMode mode)
+        {
+            switch (mode)
+            {
+                case GaussianSplatFoveatedCoverageGuardMode::eOff:
+                    return "Off";
+                case GaussianSplatFoveatedCoverageGuardMode::eGlobal:
+                    return "Global";
+                case GaussianSplatFoveatedCoverageGuardMode::eLocalBounded:
+                    return "Local Bounded";
+                case GaussianSplatFoveatedCoverageGuardMode::eRiskTriggered:
+                    return "Risk Triggered";
+            }
+            return "Unknown";
+        }
+
+        [[nodiscard]] const char* gaussianFoveatedAdaptationModeLabel(
+            const GaussianSplatFoveatedAdaptationMode mode)
+        {
+            switch (mode)
+            {
+                case GaussianSplatFoveatedAdaptationMode::eFixed:
+                    return "Fixed";
+                case GaussianSplatFoveatedAdaptationMode::eDynamicBudget:
+                    return "Dynamic Budget";
+                case GaussianSplatFoveatedAdaptationMode::eStabilityAwareBudget:
+                    return "Stability-Aware Budget";
+                case GaussianSplatFoveatedAdaptationMode::eDynamicRange:
+                    return "Dynamic Range";
+                case GaussianSplatFoveatedAdaptationMode::eProgressiveCenterOut:
+                    return "Progressive Center-Out";
+                case GaussianSplatFoveatedAdaptationMode::eProgressiveGreedy:
+                    return "Progressive Greedy";
+            }
+            return "Unknown";
+        }
+
+        [[nodiscard]] const char* gaussianFoveatedDistributionLabel(
+            const GaussianSplatFoveatedDistribution distribution)
+        {
+            switch (distribution)
+            {
+                case GaussianSplatFoveatedDistribution::eHardRing:
+                    return "Hard Ring";
+                case GaussianSplatFoveatedDistribution::eSmoothstep:
+                    return "Smoothstep";
+                case GaussianSplatFoveatedDistribution::eGaussian:
+                    return "Gaussian";
+                case GaussianSplatFoveatedDistribution::eExponential:
+                    return "Exponential";
+                case GaussianSplatFoveatedDistribution::eInversePower:
+                    return "Inverse Power";
+                case GaussianSplatFoveatedDistribution::eLogPolar:
+                    return "Log Polar";
+                case GaussianSplatFoveatedDistribution::eContinuousScheduler:
+                    return "Continuous Scheduler";
+                case GaussianSplatFoveatedDistribution::eFoveaProtectedContinuous:
+                    return "Fovea-Protected Continuous";
+                case GaussianSplatFoveatedDistribution::eCortical:
+                    return "Cortical";
+                case GaussianSplatFoveatedDistribution::eConeDensityFitted:
+                    return "Cone Density Fitted";
+            }
+            return "Unknown";
+        }
+
+        [[nodiscard]] const char* gaussianShLodGuardModeLabel(const GaussianSplatShLodGuardMode mode)
+        {
+            switch (mode)
+            {
+                case GaussianSplatShLodGuardMode::eOff:
+                    return "Off";
+                case GaussianSplatShLodGuardMode::eEnergy:
+                    return "Energy";
+                case GaussianSplatShLodGuardMode::eProjectedCost:
+                    return "Projected Cost";
+                case GaussianSplatShLodGuardMode::eEnergyProjectedCost:
+                    return "Energy + Projected Cost";
+            }
+            return "Unknown";
+        }
+
+        [[nodiscard]] const char* gaussianShStorageLayoutLabel(const GaussianSplatShStorageLayout layout)
+        {
+            switch (layout)
+            {
+                case GaussianSplatShStorageLayout::eMonolithic:
+                    return "Monolithic";
+                case GaussianSplatShStorageLayout::eSplitBands:
+                    return "Split Bands";
+            }
+            return "Unknown";
+        }
+
+        [[nodiscard]] bool shDegreesEqual(const glm::uvec3 degrees,
+                                          const uint32_t   center,
+                                          const uint32_t   mid,
+                                          const uint32_t   outer)
+        {
+            return degrees.x == center && degrees.y == mid && degrees.z == outer;
+        }
+
+        [[nodiscard]] bool gaussianFloatEqual(const float a, const float b)
+        {
+            return std::abs(a - b) <= 1e-4f;
+        }
+
+        [[nodiscard]] bool gaussianVec3Equal(const glm::vec3 a, const glm::vec3 b)
+        {
+            return gaussianFloatEqual(a.x, b.x) && gaussianFloatEqual(a.y, b.y) &&
+                   gaussianFloatEqual(a.z, b.z);
+        }
+
+        [[nodiscard]] bool gaussianFullSelectionActive(const GaussianSplatRenderSettings& settings)
+        {
+            return settings.orderedClodEnabled() && settings.lodBudgetMode == GaussianSplatLodBudgetMode::eCount &&
+                   settings.lodBudget == 0u && gaussianFloatEqual(settings.clodLevel, 1.0f);
+        }
+
+        void applyGaussianFullSelectionSettings(GaussianSplatRenderSettings& settings)
+        {
+            settings.baselineMode                         = GaussianSplatBaselineMode::eOrderedClod;
+            settings.lodBudget                            = 0u;
+            settings.clodLevel                            = 1.0f;
+            settings.lodBudgetMode                        = GaussianSplatLodBudgetMode::eCount;
+            settings.projectedCostBudget                  = 0u;
+            settings.projectedCostBudgetRatio             = 0.0f;
+            settings.foveatedClodEnabled                  = false;
+            settings.foveatedManualGazeControlEnabled     = false;
+            settings.foveatedXrGazeEnabled                = false;
+            settings.foveatedCoverageCompensationEnabled  = false;
+            settings.foveatedRenderMode                   = GaussianSplatFoveatedRenderMode::eSinglePass;
+            settings.foveatedRingLevels                   = glm::vec3 {1.0f, 1.0f, 1.0f};
+            settings.foveatedResolutionScales             = glm::vec3 {1.0f, 1.0f, 1.0f};
+            settings.foveatedCoverageGuardMode            = GaussianSplatFoveatedCoverageGuardMode::eOff;
+            settings.foveatedCoverageProtectionDegrees    = 0.0f;
+            settings.foveatedCoverageGuardBudgetRatio     = 0.0f;
+            settings.foveatedCoverageGuardMaxAdds         = 0u;
+            settings.foveatedTemporalHysteresisEnabled    = false;
+            settings.foveatedBoundarySmoothingEnabled     = false;
+            settings.foveatedAdaptationMode               = GaussianSplatFoveatedAdaptationMode::eFixed;
+        }
+
+        void applyGaussianFullSelectionGazeSettings(GaussianSplatRenderSettings& settings)
+        {
+            applyGaussianFullSelectionSettings(settings);
+            settings.foveatedClodEnabled                  = true;
+            settings.foveatedManualGazeControlEnabled     = true;
+        }
+
+        void applyGaussianSystemGazeSettings(GaussianSplatRenderSettings& settings)
+        {
+            applyGaussianFullSelectionSettings(settings);
+            settings.foveatedClodEnabled              = true;
+            settings.foveatedManualGazeControlEnabled = true;
+            settings.foveatedRingDegrees              = glm::vec2 {12.0f, 32.0f};
+            settings.foveatedRingLevels               = glm::vec3 {1.0f, 0.40f, 0.15f};
+            settings.foveatedResolutionScales         = glm::vec3 {1.0f, 0.75f, 0.50f};
+            settings.foveatedTransitionDegrees        = 8.0f;
+            settings.foveatedDistribution             = GaussianSplatFoveatedDistribution::eGaussian;
+            settings.foveatedTemporalHysteresisEnabled = true;
+            settings.foveatedBoundarySmoothingEnabled  = true;
+            settings.foveatedTemporalResidencyFrames   = 6u;
+            settings.foveatedTemporalHysteresisRatio   = 0.25f;
+            settings.foveatedBoundarySmoothingRatio    = 0.18f;
+        }
+
+        void applyGaussianFullSh3(GaussianSplatRenderSettings& settings)
+        {
+            settings.foveatedShLodEnabled      = false;
+            settings.foveatedShLodDegrees      = glm::uvec3 {3u, 3u, 3u};
+            settings.foveatedShLodGuardMode    = GaussianSplatShLodGuardMode::eOff;
+            settings.shStorageLayout           = GaussianSplatShStorageLayout::eMonolithic;
+            settings.shDegreeHysteresisEnabled = false;
+            settings.shPopLogEnabled           = false;
+        }
+
+        void applyGaussianUniformShDegree(GaussianSplatRenderSettings& settings, const uint32_t degree)
+        {
+            const uint32_t clampedDegree       = std::clamp(degree, 0u, 3u);
+            settings.foveatedShLodEnabled      = true;
+            settings.foveatedShLodDegrees      = glm::uvec3 {clampedDegree, clampedDegree, clampedDegree};
+            settings.foveatedShLodGuardMode    = GaussianSplatShLodGuardMode::eOff;
+            settings.shStorageLayout           = GaussianSplatShStorageLayout::eMonolithic;
+            settings.shDegreeHysteresisEnabled = false;
+            settings.shPopLogEnabled           = false;
+        }
+
+        void applyGaussianGazeShDegree(GaussianSplatRenderSettings& settings,
+                                       const glm::uvec3             degrees,
+                                       const GaussianSplatShLodGuardMode guardMode)
+        {
+            settings.foveatedShLodEnabled      = true;
+            settings.foveatedShLodDegrees      = glm::clamp(degrees, glm::uvec3 {0u}, glm::uvec3 {3u});
+            settings.foveatedShLodGuardMode    = guardMode;
+            settings.shStorageLayout           = GaussianSplatShStorageLayout::eMonolithic;
+            settings.shDegreeHysteresisEnabled = false;
+            settings.shPopLogEnabled           = false;
+        }
+
+        [[nodiscard]] bool gaussianSystemGazePresetActive(const GaussianSplatRenderSettings& settings)
+        {
+            return gaussianFullSelectionActive(settings) && settings.foveatedClodEnabled &&
+                   gaussianVec3Equal(settings.foveatedRingLevels, glm::vec3 {1.0f, 0.40f, 0.15f}) &&
+                   gaussianVec3Equal(settings.foveatedResolutionScales, glm::vec3 {1.0f, 0.75f, 0.50f});
+        }
+
+        [[nodiscard]] int gaussianDemoPresetIndex(const GaussianSplatRenderSettings& settings)
+        {
+            constexpr int kCustomPreset = 8;
+            const auto    degrees       = glm::clamp(settings.foveatedShLodDegrees,
+                                                     glm::uvec3 {0u},
+                                                     glm::uvec3 {3u});
+            const bool guardOff =
+                settings.foveatedShLodGuardMode == GaussianSplatShLodGuardMode::eOff;
+            const bool energyGuard =
+                settings.foveatedShLodGuardMode == GaussianSplatShLodGuardMode::eEnergy;
+            const bool fullSelection = gaussianFullSelectionActive(settings);
+            const bool noGazeSelection = !settings.foveatedClodEnabled;
+
+            if (fullSelection && noGazeSelection && !settings.foveatedShLodEnabled)
+                return 0;
+            if (fullSelection && noGazeSelection && settings.foveatedShLodEnabled && guardOff)
+            {
+                if (shDegreesEqual(degrees, 2u, 2u, 2u))
+                    return 1;
+                if (shDegreesEqual(degrees, 1u, 1u, 1u))
+                    return 2;
+                if (shDegreesEqual(degrees, 0u, 0u, 0u))
+                    return 3;
+            }
+
+            if (fullSelection && settings.foveatedClodEnabled &&
+                gaussianVec3Equal(settings.foveatedRingLevels, glm::vec3 {1.0f, 1.0f, 1.0f}))
+            {
+                if (settings.foveatedShLodEnabled && guardOff && shDegreesEqual(degrees, 3u, 2u, 1u))
+                    return 4;
+            }
+
+            if (gaussianSystemGazePresetActive(settings))
+            {
+                if (!settings.foveatedShLodEnabled)
+                    return 5;
+                if (shDegreesEqual(degrees, 3u, 2u, 1u))
+                {
+                    if (guardOff)
+                        return 6;
+                    if (energyGuard)
+                        return 7;
+                }
+            }
+
+            return kCustomPreset;
+        }
+
+        void applyGaussianDemoPreset(GaussianSplatRenderSettings& settings, const int presetIndex)
+        {
+            switch (presetIndex)
+            {
+                case 0:
+                    applyGaussianFullSelectionSettings(settings);
+                    applyGaussianFullSh3(settings);
+                    break;
+                case 1:
+                    applyGaussianFullSelectionSettings(settings);
+                    applyGaussianUniformShDegree(settings, 2u);
+                    break;
+                case 2:
+                    applyGaussianFullSelectionSettings(settings);
+                    applyGaussianUniformShDegree(settings, 1u);
+                    break;
+                case 3:
+                    applyGaussianFullSelectionSettings(settings);
+                    applyGaussianUniformShDegree(settings, 0u);
+                    break;
+                case 4:
+                    applyGaussianFullSelectionGazeSettings(settings);
+                    applyGaussianGazeShDegree(settings, glm::uvec3 {3u, 2u, 1u}, GaussianSplatShLodGuardMode::eOff);
+                    break;
+                case 5:
+                    applyGaussianSystemGazeSettings(settings);
+                    applyGaussianFullSh3(settings);
+                    break;
+                case 6:
+                    applyGaussianSystemGazeSettings(settings);
+                    applyGaussianGazeShDegree(settings, glm::uvec3 {3u, 2u, 1u}, GaussianSplatShLodGuardMode::eOff);
+                    break;
+                case 7:
+                    applyGaussianSystemGazeSettings(settings);
+                    applyGaussianGazeShDegree(settings, glm::uvec3 {3u, 2u, 1u}, GaussianSplatShLodGuardMode::eEnergy);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        [[nodiscard]] int gaussianShStagePresetIndex(const GaussianSplatRenderSettings& settings)
+        {
+            constexpr int kCustomPreset = 6;
+            if (!settings.foveatedShLodEnabled)
+                return 0;
+
+            const auto degrees = glm::clamp(settings.foveatedShLodDegrees, glm::uvec3 {0u}, glm::uvec3 {3u});
+            const bool monolithic = settings.shStorageLayout == GaussianSplatShStorageLayout::eMonolithic;
+            const bool split      = settings.shStorageLayout == GaussianSplatShStorageLayout::eSplitBands;
+            const bool guardOff   = settings.foveatedShLodGuardMode == GaussianSplatShLodGuardMode::eOff;
+            const bool energyGuard = settings.foveatedShLodGuardMode == GaussianSplatShLodGuardMode::eEnergy;
+            const bool stabilized = settings.shDegreeHysteresisEnabled && settings.shPopLogEnabled;
+
+            if (shDegreesEqual(degrees, 3u, 2u, 1u) && guardOff && monolithic && !stabilized)
+                return 1;
+            if (shDegreesEqual(degrees, 3u, 2u, 1u) && energyGuard && monolithic && !stabilized)
+                return 2;
+            if (shDegreesEqual(degrees, 3u, 2u, 1u) && energyGuard && split && !stabilized)
+                return 3;
+            if (shDegreesEqual(degrees, 3u, 1u, 0u) && energyGuard && split && !stabilized)
+                return 4;
+            if (shDegreesEqual(degrees, 3u, 2u, 1u) && energyGuard && split && stabilized)
+                return 5;
+            return kCustomPreset;
+        }
+
+        void applyGaussianShStagePreset(GaussianSplatRenderSettings& settings, const int presetIndex)
+        {
+            applyGaussianFullSelectionGazeSettings(settings);
+
+            if (presetIndex == 0)
+            {
+                settings.foveatedShLodEnabled      = false;
+                settings.foveatedShLodDegrees      = glm::uvec3 {3u, 3u, 3u};
+                settings.foveatedShLodGuardMode    = GaussianSplatShLodGuardMode::eOff;
+                settings.shDegreeHysteresisEnabled = false;
+                settings.shPopLogEnabled           = false;
+                return;
+            }
+
+            if (presetIndex < 1 || presetIndex > 5)
+                return;
+
+            settings.foveatedShLodEnabled      = true;
+            settings.foveatedShLodDegrees      = glm::uvec3 {3u, 2u, 1u};
+            settings.foveatedShLodGuardMode    = GaussianSplatShLodGuardMode::eEnergy;
+            settings.shStorageLayout           = GaussianSplatShStorageLayout::eMonolithic;
+            settings.shDegreeHysteresisEnabled = false;
+            settings.shPopLogEnabled           = false;
+
+            switch (presetIndex)
+            {
+                case 1:
+                    settings.foveatedShLodGuardMode = GaussianSplatShLodGuardMode::eOff;
+                    break;
+                case 2:
+                    break;
+                case 3:
+                    settings.shStorageLayout = GaussianSplatShStorageLayout::eSplitBands;
+                    break;
+                case 4:
+                    settings.foveatedShLodDegrees = glm::uvec3 {3u, 1u, 0u};
+                    settings.shStorageLayout      = GaussianSplatShStorageLayout::eSplitBands;
+                    break;
+                case 5:
+                    settings.shStorageLayout           = GaussianSplatShStorageLayout::eSplitBands;
+                    settings.shDegreeHysteresisEnabled = true;
+                    settings.shPopLogEnabled           = true;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        [[nodiscard]] bool gaussianManualGazeControlActive(const GaussianSplatRenderSettings& settings)
+        {
+            return (settings.foveatedClodActive() ||
+                    (settings.shaderAntiPopActive() && settings.shaderAntiPopOrderFree &&
+                     settings.foveatedClodEnabled)) &&
+                   settings.foveatedManualGazeControlEnabled;
+        }
+
+        void drawGaussianManualGazeOverlay(GaussianSplatRenderSettings& settings)
+        {
+            if (!gaussianManualGazeControlActive(settings))
+                return;
+
+            const ImGuiViewport* viewport = ImGui::GetMainViewport();
+            if (!viewport || viewport->Size.x <= 0.0f || viewport->Size.y <= 0.0f)
+                return;
+
+            auto& io = ImGui::GetIO();
+            const ImVec2 mouse = io.MousePos;
+            const ImVec2 viewMin = viewport->Pos;
+            const ImVec2 viewSize = io.DisplaySize.x > 0.0f && io.DisplaySize.y > 0.0f ? io.DisplaySize :
+                                                                                         viewport->Size;
+            const ImVec2 viewMax {viewMin.x + viewSize.x, viewMin.y + viewSize.y};
+            const bool   mouseInside =
+                mouse.x >= viewMin.x && mouse.x <= viewMax.x && mouse.y >= viewMin.y && mouse.y <= viewMax.y;
+
+            if (mouseInside && !io.WantCaptureMouse && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            {
+                settings.foveatedGaze.x = std::clamp((mouse.x - viewMin.x) / viewSize.x, 0.0f, 1.0f);
+                settings.foveatedGaze.y = std::clamp((mouse.y - viewMin.y) / viewSize.y, 0.0f, 1.0f);
+            }
+
+            const ImVec2 gaze {
+                viewMin.x + settings.foveatedGaze.x * viewSize.x,
+                viewMin.y + settings.foveatedGaze.y * viewSize.y,
+            };
+            ImDrawList* drawList = ImGui::GetForegroundDrawList();
+            drawList->AddCircleFilled(gaze, 5.0f, IM_COL32(255, 32, 32, 255), 24);
+            drawList->AddCircle(gaze, 8.0f, IM_COL32(255, 255, 255, 220), 24, 1.5f);
+        }
+
+        void drawGazeMarker(ImDrawList& drawList, const ImVec2 imageMin, const ImVec2 imageSize, const glm::vec2 gazeUv)
+        {
+            if (imageSize.x <= 0.0f || imageSize.y <= 0.0f)
+                return;
+
+            const ImVec2 gaze {
+                imageMin.x + std::clamp(gazeUv.x, 0.0f, 1.0f) * imageSize.x,
+                imageMin.y + std::clamp(gazeUv.y, 0.0f, 1.0f) * imageSize.y,
+            };
+            drawList.AddCircleFilled(gaze, 5.0f, IM_COL32(255, 32, 32, 255), 24);
+            drawList.AddCircle(gaze, 8.0f, IM_COL32(255, 255, 255, 220), 24, 1.5f);
         }
 
         [[nodiscard]] double findScopeGpuMs(const std::vector<RuntimeProfiler::ScopeNode>& nodes,
@@ -106,7 +552,7 @@ namespace vultra
                 ImGui::Text("%s: %u", label, value);
         }
 
-        void drawGaussianSplatBaselinePanel(IRenderService& renderService)
+        void drawGaussianSplatBaselinePanel(IRenderService& renderService, const IRenderBackendService& backendService)
         {
             if (!ImGui::CollapsingHeader("Gaussian Splat Baseline", ImGuiTreeNodeFlags_DefaultOpen))
                 return;
@@ -114,10 +560,7 @@ namespace vultra
             auto&       settings = renderService.gaussianSplatSettings();
             const auto& stats    = renderService.gaussianSplatFrameStats();
 
-            constexpr const char* kModeLabels[] = {"Baseline",
-                                                   "Conservative Sort",
-                                                   "Ordered CLOD",
-                                                   "Ordered CLOD + Sort"};
+            constexpr const char* kModeLabels[] = {"Baseline", "Ordered CLOD"};
             int modeIndex = static_cast<int>(settings.baselineMode);
             if (ImGui::Combo("Mode", &modeIndex, kModeLabels, IM_ARRAYSIZE(kModeLabels)))
             {
@@ -127,6 +570,26 @@ namespace vultra
 
             const bool lodControlsEnabled = settings.lodBudgetEnabled();
             const bool orderedClodEnabled  = settings.orderedClodEnabled();
+            if (!orderedClodEnabled)
+                ImGui::BeginDisabled();
+            constexpr const char* kLodBudgetModeLabels[] = {
+                "Count",
+                "Projected Tile Cost",
+                "Foveated Score",
+                "Coverage Bin Score",
+            };
+            int lodBudgetModeIndex = static_cast<int>(settings.lodBudgetMode);
+            if (ImGui::Combo("LOD Budget Mode",
+                             &lodBudgetModeIndex,
+                             kLodBudgetModeLabels,
+                             IM_ARRAYSIZE(kLodBudgetModeLabels)))
+            {
+                lodBudgetModeIndex = std::clamp(lodBudgetModeIndex, 0, IM_ARRAYSIZE(kLodBudgetModeLabels) - 1);
+                settings.lodBudgetMode = static_cast<GaussianSplatLodBudgetMode>(lodBudgetModeIndex);
+            }
+            if (!orderedClodEnabled)
+                ImGui::EndDisabled();
+
             const uint32_t budgetSliderMax =
                 std::min(stats.totalSplats, static_cast<uint32_t>(std::numeric_limits<int>::max()));
             settings.lodBudget = std::min(settings.lodBudget, budgetSliderMax);
@@ -142,33 +605,388 @@ namespace vultra
                 ImGui::BeginDisabled();
             ImGui::SliderFloat("CLOD Level", &settings.clodLevel, 0.01f, 1.0f, "%.2f");
             settings.clodLevel = std::clamp(settings.clodLevel, 0.01f, 1.0f);
-            ImGui::Checkbox("Distance CLOD", &settings.clodDistanceLodEnabled);
-            if (!settings.clodDistanceLodEnabled)
-                ImGui::BeginDisabled();
-            ImGui::SliderFloat("Near Distance", &settings.clodMinDistance, 0.0f, 100.0f, "%.2f");
-            settings.clodMaxDistance = std::max(settings.clodMaxDistance, settings.clodMinDistance + 0.001f);
-            ImGui::SliderFloat("Far Distance", &settings.clodMaxDistance, settings.clodMinDistance + 0.001f, 200.0f, "%.2f");
-            ImGui::SliderFloat("Near LOD", &settings.clodNearLod, 0.05f, 1.0f, "%.2f");
-            settings.clodNearLod = std::clamp(settings.clodNearLod, 0.05f, 1.0f);
-            settings.clodFarLod  = std::min(settings.clodFarLod, settings.clodNearLod);
-            ImGui::SliderFloat("Far LOD", &settings.clodFarLod, 0.01f, settings.clodNearLod, "%.2f");
-            settings.clodFarLod = std::clamp(settings.clodFarLod, 0.01f, settings.clodNearLod);
-            ImGui::SliderFloat("Fade Width", &settings.clodFadeWidth, 0.01f, 1.0f, "%.2f");
-            settings.clodFadeWidth = std::clamp(settings.clodFadeWidth, 0.01f, 1.0f);
-            if (!settings.clodDistanceLodEnabled)
-                ImGui::EndDisabled();
             if (!orderedClodEnabled)
                 ImGui::EndDisabled();
 
+            constexpr const char* kDemoPresetLabels[] = {
+                "0 Reference: Full Gaussian + SH3",
+                "1 Full-frame SH2",
+                "2 Full-frame SH1",
+                "3 Full-frame SH0",
+                "4 SH gaze 3/2/1 + Full Gaussian",
+                "5 System gaze only + SH3",
+                "6 System gaze + SH 3/2/1",
+                "7 System gaze + Guarded SH 3/2/1",
+                "Custom",
+            };
+            int demoPresetIndex = gaussianDemoPresetIndex(settings);
+            if (ImGui::Combo("Demo Stage", &demoPresetIndex, kDemoPresetLabels, IM_ARRAYSIZE(kDemoPresetLabels)))
+            {
+                demoPresetIndex = std::clamp(demoPresetIndex, 0, IM_ARRAYSIZE(kDemoPresetLabels) - 1);
+                applyGaussianDemoPreset(settings, demoPresetIndex);
+            }
+
+            constexpr const char* kShStagePresetLabels[] = {
+                "Full SH3 / Full Gaussian",
+                "SH gaze 3/2/1 / Full Gaussian",
+                "SH gaze guard 3/2/1 / Full Gaussian",
+                "SH gaze guard 3/2/1 split / Full Gaussian",
+                "SH gaze guard 3/1/0 split / Full Gaussian",
+                "SH gaze stabilized 3/2/1 split / Full Gaussian",
+                "Custom",
+            };
+
+            const bool projectedCostControlsEnabled =
+                orderedClodEnabled && settings.lodBudgetMode == GaussianSplatLodBudgetMode::eProjectedTileCost;
+            if (!projectedCostControlsEnabled)
+                ImGui::BeginDisabled();
+            uint64_t projectedCostBudget = settings.projectedCostBudget;
+            if (ImGui::InputScalar("Projected Cost Budget", ImGuiDataType_U64, &projectedCostBudget))
+                settings.projectedCostBudget = projectedCostBudget;
+            ImGui::SliderFloat(
+                "Projected Cost Ratio", &settings.projectedCostBudgetRatio, 0.0f, 1.0f, "%.2f");
+            int projectedCostChunkSize =
+                static_cast<int>(std::min(settings.projectedCostChunkSize,
+                                          static_cast<uint32_t>(std::numeric_limits<int>::max())));
+            if (ImGui::SliderInt("Projected Cost Chunk", &projectedCostChunkSize, 1, 8192, "%d splats"))
+                settings.projectedCostChunkSize =
+                    static_cast<uint32_t>(std::clamp(projectedCostChunkSize, 1, 8192));
+            constexpr const char* kProjectedCostBuildModeLabels[] = {"CPU", "GPU Sync"};
+            int projectedCostBuildModeIndex = static_cast<int>(settings.projectedCostBuildMode);
+            if (ImGui::Combo("Projected Cost Builder",
+                             &projectedCostBuildModeIndex,
+                             kProjectedCostBuildModeLabels,
+                             IM_ARRAYSIZE(kProjectedCostBuildModeLabels)))
+            {
+                projectedCostBuildModeIndex =
+                    std::clamp(projectedCostBuildModeIndex, 0, IM_ARRAYSIZE(kProjectedCostBuildModeLabels) - 1);
+                settings.projectedCostBuildMode =
+                    static_cast<GaussianProjectedCostBuildMode>(projectedCostBuildModeIndex);
+            }
+            ImGui::Checkbox("Semantic Difference Cost", &settings.projectedCostSemanticDiffEnabled);
+            settings.projectedCostBudgetRatio = std::clamp(settings.projectedCostBudgetRatio, 0.0f, 1.0f);
+            settings.projectedCostChunkSize   = std::max(settings.projectedCostChunkSize, 1u);
+            if (!projectedCostControlsEnabled)
+                ImGui::EndDisabled();
+
+            ImGui::SeparatorText("Gaze Rendering");
+            if (!orderedClodEnabled)
+                ImGui::BeginDisabled();
+            ImGui::Checkbox("Enable Gaze Rendering", &settings.foveatedClodEnabled);
+            if (!orderedClodEnabled)
+                ImGui::EndDisabled();
+
+            const bool gazeControlsEnabled = orderedClodEnabled && settings.foveatedClodEnabled;
+            if (!gazeControlsEnabled)
+                ImGui::BeginDisabled();
+            constexpr const char* kFoveatedModeLabels[] = {"Single Pass", "Layered Composite"};
+            int foveatedModeIndex = static_cast<int>(settings.foveatedRenderMode);
+            if (ImGui::Combo("Gaze Render Path",
+                             &foveatedModeIndex,
+                             kFoveatedModeLabels,
+                             IM_ARRAYSIZE(kFoveatedModeLabels)))
+            {
+                foveatedModeIndex = std::clamp(foveatedModeIndex, 0, IM_ARRAYSIZE(kFoveatedModeLabels) - 1);
+                settings.foveatedRenderMode = static_cast<GaussianSplatFoveatedRenderMode>(foveatedModeIndex);
+            }
+            ImGui::Checkbox("Coverage Compensation", &settings.foveatedCoverageCompensationEnabled);
+            ImGui::Checkbox("Manual Gaze Point", &settings.foveatedManualGazeControlEnabled);
+            const bool xrGazeAvailable = backendService.isXREnabled();
+            if (!xrGazeAvailable)
+                ImGui::BeginDisabled();
+            ImGui::Checkbox("XR Eye Gaze", &settings.foveatedXrGazeEnabled);
+            if (!xrGazeAvailable)
+                ImGui::EndDisabled();
+            if (settings.foveatedManualGazeControlEnabled)
+                settings.foveatedXrGazeEnabled = false;
+            ImGui::SliderFloat2("Gaze UV", &settings.foveatedGaze.x, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Fovea Degrees", &settings.foveatedRingDegrees.x, 0.0f, 45.0f, "%.1f");
+            ImGui::SliderFloat("Mid Degrees", &settings.foveatedRingDegrees.y, 0.0f, 90.0f, "%.1f");
+            settings.foveatedRingDegrees.x = std::max(settings.foveatedRingDegrees.x, 0.0f);
+            settings.foveatedRingDegrees.y =
+                std::max(settings.foveatedRingDegrees.y, settings.foveatedRingDegrees.x);
+            ImGui::SliderFloat("Fovea LOD", &settings.foveatedRingLevels.x, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Mid LOD", &settings.foveatedRingLevels.y, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Outer LOD", &settings.foveatedRingLevels.z, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Fovea Resolution", &settings.foveatedResolutionScales.x, 0.05f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Mid Resolution", &settings.foveatedResolutionScales.y, 0.05f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Outer Resolution", &settings.foveatedResolutionScales.z, 0.05f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Transition Degrees", &settings.foveatedTransitionDegrees, 0.0f, 20.0f, "%.1f");
+            constexpr const char* kCoverageGuardLabels[] = {
+                "Off",
+                "Global",
+                "Local Bounded",
+                "Risk Triggered",
+            };
+            int coverageGuardIndex = static_cast<int>(settings.foveatedCoverageGuardMode);
+            if (ImGui::Combo("Coverage Guard",
+                             &coverageGuardIndex,
+                             kCoverageGuardLabels,
+                             IM_ARRAYSIZE(kCoverageGuardLabels)))
+            {
+                coverageGuardIndex = std::clamp(coverageGuardIndex, 0, IM_ARRAYSIZE(kCoverageGuardLabels) - 1);
+                settings.foveatedCoverageGuardMode =
+                    static_cast<GaussianSplatFoveatedCoverageGuardMode>(coverageGuardIndex);
+            }
+            ImGui::SliderFloat(
+                "Coverage Protection", &settings.foveatedCoverageProtectionDegrees, 0.0f, 12.0f, "%.1f deg");
+            ImGui::SliderFloat(
+                "Guard Budget", &settings.foveatedCoverageGuardBudgetRatio, 0.0f, 0.10f, "%.3f");
+            ImGui::SliderFloat(
+                "Guard Center Min", &settings.foveatedCoverageGuardMinLevels.x, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat(
+                "Guard Transition Min", &settings.foveatedCoverageGuardMinLevels.y, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat(
+                "Guard Periphery Min", &settings.foveatedCoverageGuardMinLevels.z, 0.0f, 1.0f, "%.2f");
+            ImGui::Checkbox("Temporal Hysteresis", &settings.foveatedTemporalHysteresisEnabled);
+            ImGui::Checkbox("Boundary Smoothing", &settings.foveatedBoundarySmoothingEnabled);
+            int temporalResidencyFrames = static_cast<int>(settings.foveatedTemporalResidencyFrames);
+            if (ImGui::SliderInt("Temporal Residency", &temporalResidencyFrames, 0, 8, "%d frames"))
+                settings.foveatedTemporalResidencyFrames =
+                    static_cast<uint32_t>(std::clamp(temporalResidencyFrames, 0, 255));
+            ImGui::SliderFloat(
+                "Temporal Hysteresis Ratio", &settings.foveatedTemporalHysteresisRatio, 0.0f, 0.5f, "%.2f");
+            ImGui::SliderFloat(
+                "Boundary Smoothing Ratio", &settings.foveatedBoundarySmoothingRatio, 0.0f, 0.5f, "%.2f");
+            constexpr const char* kDistributionLabels[] = {
+                "Hard Ring",
+                "Smoothstep",
+                "Gaussian",
+                "Exponential",
+                "Inverse Power",
+                "Log Polar",
+                "Continuous Scheduler",
+            };
+            int distributionIndex = static_cast<int>(settings.foveatedDistribution);
+            if (ImGui::Combo("Gaze Distribution", &distributionIndex, kDistributionLabels, IM_ARRAYSIZE(kDistributionLabels)))
+            {
+                distributionIndex = std::clamp(distributionIndex, 0, IM_ARRAYSIZE(kDistributionLabels) - 1);
+                settings.foveatedDistribution =
+                    static_cast<GaussianSplatFoveatedDistribution>(distributionIndex);
+            }
+            constexpr const char* kAdaptationLabels[] = {
+                "Fixed",
+                "Dynamic Budget",
+                "Dynamic Range",
+                "Progressive Center-Out",
+                "Progressive Greedy",
+            };
+            int adaptationIndex = static_cast<int>(settings.foveatedAdaptationMode);
+            if (ImGui::Combo("Gaze Adaptation", &adaptationIndex, kAdaptationLabels, IM_ARRAYSIZE(kAdaptationLabels)))
+            {
+                adaptationIndex = std::clamp(adaptationIndex, 0, IM_ARRAYSIZE(kAdaptationLabels) - 1);
+                settings.foveatedAdaptationMode =
+                    static_cast<GaussianSplatFoveatedAdaptationMode>(adaptationIndex);
+            }
+            const bool adaptationEnabled =
+                settings.foveatedAdaptationMode != GaussianSplatFoveatedAdaptationMode::eFixed;
+            if (!adaptationEnabled)
+                ImGui::BeginDisabled();
+            ImGui::SliderFloat("Target Frame", &settings.foveatedTargetFrameMs, 1.0f, 33.3f, "%.1f ms");
+            ImGui::SliderFloat("Adaptation Step", &settings.foveatedBudgetAdjustRate, 0.001f, 0.25f, "%.3f");
+            if (!adaptationEnabled)
+                ImGui::EndDisabled();
+            settings.foveatedGaze.x = std::clamp(settings.foveatedGaze.x, 0.0f, 1.0f);
+            settings.foveatedGaze.y = std::clamp(settings.foveatedGaze.y, 0.0f, 1.0f);
+            settings.foveatedRingLevels.x = std::clamp(settings.foveatedRingLevels.x, 0.0f, 1.0f);
+            settings.foveatedRingLevels.y = std::clamp(settings.foveatedRingLevels.y, 0.0f, 1.0f);
+            settings.foveatedRingLevels.z = std::clamp(settings.foveatedRingLevels.z, 0.0f, 1.0f);
+            settings.foveatedResolutionScales.x = std::clamp(settings.foveatedResolutionScales.x, 0.05f, 1.0f);
+            settings.foveatedResolutionScales.y = std::clamp(settings.foveatedResolutionScales.y, 0.05f, 1.0f);
+            settings.foveatedResolutionScales.z = std::clamp(settings.foveatedResolutionScales.z, 0.05f, 1.0f);
+            settings.foveatedTransitionDegrees = std::max(settings.foveatedTransitionDegrees, 0.0f);
+            settings.foveatedTargetFrameMs = std::max(settings.foveatedTargetFrameMs, 0.1f);
+            settings.foveatedBudgetAdjustRate = std::clamp(settings.foveatedBudgetAdjustRate, 0.001f, 0.25f);
+            settings.foveatedCoverageProtectionDegrees =
+                std::clamp(settings.foveatedCoverageProtectionDegrees, 0.0f, 12.0f);
+            settings.foveatedCoverageGuardBudgetRatio =
+                std::clamp(settings.foveatedCoverageGuardBudgetRatio, 0.0f, 0.25f);
+            settings.foveatedCoverageGuardMinLevels =
+                glm::clamp(settings.foveatedCoverageGuardMinLevels, glm::vec3 {0.0f}, glm::vec3 {1.0f});
+            settings.foveatedTemporalResidencyFrames =
+                std::clamp(settings.foveatedTemporalResidencyFrames, 0u, 255u);
+            settings.foveatedTemporalHysteresisRatio =
+                std::clamp(settings.foveatedTemporalHysteresisRatio, 0.0f, 1.0f);
+            settings.foveatedBoundarySmoothingRatio =
+                std::clamp(settings.foveatedBoundarySmoothingRatio, 0.0f, 1.0f);
+            if (!gazeControlsEnabled)
+                ImGui::EndDisabled();
+
+            ImGui::SeparatorText("SH Appearance LOD");
+            int shStagePresetIndex = gaussianShStagePresetIndex(settings);
+            if (ImGui::Combo("SH Stage Preset",
+                             &shStagePresetIndex,
+                             kShStagePresetLabels,
+                             IM_ARRAYSIZE(kShStagePresetLabels)))
+            {
+                shStagePresetIndex =
+                    std::clamp(shStagePresetIndex, 0, IM_ARRAYSIZE(kShStagePresetLabels) - 1);
+                applyGaussianShStagePreset(settings, shStagePresetIndex);
+            }
+
+            bool shLodEnabled = settings.foveatedShLodEnabled;
+            if (ImGui::Checkbox("Enable SH LOD", &shLodEnabled))
+            {
+                settings.foveatedShLodEnabled = shLodEnabled;
+                if (settings.foveatedShLodEnabled)
+                    settings.baselineMode = GaussianSplatBaselineMode::eOrderedClod;
+            }
+
+            if (!settings.foveatedShLodEnabled)
+                ImGui::BeginDisabled();
+            int shDegreeCenter = static_cast<int>(std::clamp(settings.foveatedShLodDegrees.x, 0u, 3u));
+            int shDegreeMid    = static_cast<int>(std::clamp(settings.foveatedShLodDegrees.y, 0u, 3u));
+            int shDegreeOuter  = static_cast<int>(std::clamp(settings.foveatedShLodDegrees.z, 0u, 3u));
+            if (ImGui::SliderInt("Center SH Degree", &shDegreeCenter, 0, 3))
+                settings.foveatedShLodDegrees.x = static_cast<uint32_t>(std::clamp(shDegreeCenter, 0, 3));
+            if (ImGui::SliderInt("Mid SH Degree", &shDegreeMid, 0, 3))
+                settings.foveatedShLodDegrees.y = static_cast<uint32_t>(std::clamp(shDegreeMid, 0, 3));
+            if (ImGui::SliderInt("Outer SH Degree", &shDegreeOuter, 0, 3))
+                settings.foveatedShLodDegrees.z = static_cast<uint32_t>(std::clamp(shDegreeOuter, 0, 3));
+
+            constexpr const char* kShGuardLabels[] = {
+                "Off",
+                "Energy",
+                "Projected Cost",
+                "Energy + Projected Cost",
+            };
+            int shGuardIndex = static_cast<int>(settings.foveatedShLodGuardMode);
+            if (ImGui::Combo("SH Guard", &shGuardIndex, kShGuardLabels, IM_ARRAYSIZE(kShGuardLabels)))
+            {
+                shGuardIndex = std::clamp(shGuardIndex, 0, IM_ARRAYSIZE(kShGuardLabels) - 1);
+                settings.foveatedShLodGuardMode = static_cast<GaussianSplatShLodGuardMode>(shGuardIndex);
+            }
+            const bool shGuardEnabled = settings.foveatedShLodGuardMode != GaussianSplatShLodGuardMode::eOff;
+            if (!shGuardEnabled)
+                ImGui::BeginDisabled();
+            ImGui::SliderFloat(
+                "SH Guard Mid Threshold", &settings.foveatedShLodGuardThresholdMid, 0.0f, 1.0f, "%.3f");
+            ImGui::SliderFloat(
+                "SH Guard High Threshold", &settings.foveatedShLodGuardThresholdHigh, 0.0f, 1.0f, "%.3f");
+            if (!shGuardEnabled)
+                ImGui::EndDisabled();
+
+            constexpr const char* kShStorageLabels[] = {"Monolithic", "Split Bands"};
+            int shStorageIndex = static_cast<int>(settings.shStorageLayout);
+            if (ImGui::Combo("SH Storage", &shStorageIndex, kShStorageLabels, IM_ARRAYSIZE(kShStorageLabels)))
+            {
+                shStorageIndex = std::clamp(shStorageIndex, 0, IM_ARRAYSIZE(kShStorageLabels) - 1);
+                settings.shStorageLayout = static_cast<GaussianSplatShStorageLayout>(shStorageIndex);
+            }
+            ImGui::Checkbox("SH Pop Log", &settings.shPopLogEnabled);
+            ImGui::Checkbox("SH Degree Hysteresis", &settings.shDegreeHysteresisEnabled);
+            if (!settings.shDegreeHysteresisEnabled)
+                ImGui::BeginDisabled();
+            int shDegreeDowngradeDelay = static_cast<int>(settings.shDegreeDowngradeDelay);
+            if (ImGui::SliderInt("SH Downgrade Delay", &shDegreeDowngradeDelay, 0, 16, "%d frames"))
+                settings.shDegreeDowngradeDelay =
+                    static_cast<uint32_t>(std::clamp(shDegreeDowngradeDelay, 0, 255));
+            ImGui::SliderFloat("SH Guard Band", &settings.shDegreeGuardBandDegrees, 0.0f, 12.0f, "%.1f deg");
+            if (!settings.shDegreeHysteresisEnabled)
+                ImGui::EndDisabled();
+            if (!settings.foveatedShLodEnabled)
+                ImGui::EndDisabled();
+
+            settings.foveatedShLodDegrees =
+                glm::clamp(settings.foveatedShLodDegrees, glm::uvec3 {0u}, glm::uvec3 {3u});
+            settings.foveatedShLodGuardThresholdMid =
+                std::max(settings.foveatedShLodGuardThresholdMid, 0.0f);
+            settings.foveatedShLodGuardThresholdHigh =
+                std::max(settings.foveatedShLodGuardThresholdHigh,
+                         settings.foveatedShLodGuardThresholdMid);
+            settings.shDegreeDowngradeDelay = std::clamp(settings.shDegreeDowngradeDelay, 0u, 255u);
+            settings.shDegreeGuardBandDegrees = std::max(settings.shDegreeGuardBandDegrees, 0.0f);
+
             ImGui::SeparatorText("Counters");
             ImGui::Text("Mode: %s", gaussianBaselineModeLabel(stats.baselineMode));
-            ImGui::Text("Sort: %s", gaussianSortModeLabel(stats.sortMode));
+            ImGui::Text("LOD Budget Mode: %s", gaussianLodBudgetModeLabel(stats.lodBudgetMode));
+            ImGui::Text("LOD Budget: %s / %u", stats.lodBudgetEnabled ? "enabled" : "disabled", stats.lodBudget);
+            ImGui::Text("Projected Cost: budget=%llu actual=%llu overshoot=%llu chunks=%u",
+                        static_cast<unsigned long long>(stats.costBudget),
+                        static_cast<unsigned long long>(stats.actualProjectedCost),
+                        static_cast<unsigned long long>(stats.costOvershoot),
+                        stats.selectedCostChunks);
+            ImGui::Text("Projected Builder: %s / chunk=%u / ratio=%.2f / semantic=%s",
+                        gaussianProjectedCostBuildModeLabel(stats.projectedCostBuildMode),
+                        stats.projectedCostChunkSize,
+                        stats.projectedCostBudgetRatio,
+                        stats.projectedCostSemanticDiffEnabled ? "yes" : "no");
+            ImGui::Text("Gaze Rendering: %s", stats.foveatedClodEnabled ? "yes" : "no");
+            ImGui::Text("Gaze Render Path: %s", gaussianFoveatedRenderModeLabel(stats.foveatedRenderMode));
+            ImGui::Text("Layered Framebuffers: %s", stats.foveatedLayeredCompositeEnabled ? "yes" : "no");
+            ImGui::Text("XR Eye Gaze: %s%s",
+                        stats.foveatedXrGazeEnabled ? "enabled" : "disabled",
+                        stats.foveatedXrGazeActive ? " / active" : "");
+            ImGui::Text("Coverage Compensation: %s",
+                        stats.foveatedCoverageCompensationEnabled ? "yes" : "no");
+            ImGui::Text("Gaze UV: %.2f / %.2f", stats.foveatedGaze.x, stats.foveatedGaze.y);
+            ImGui::Text("Gaze Adaptation: %s", gaussianFoveatedAdaptationModeLabel(stats.foveatedAdaptationMode));
+            ImGui::Text("Gaze Distribution: %s", gaussianFoveatedDistributionLabel(stats.foveatedDistribution));
+            ImGui::Text("Coverage Guard: %s / %.1f deg / %.1f%%",
+                        gaussianFoveatedCoverageGuardModeLabel(stats.foveatedCoverageGuardMode),
+                        stats.foveatedCoverageProtectionDegrees,
+                        stats.foveatedCoverageGuardBudgetRatio * 100.0f);
+            ImGui::Text("Guard Risk: sectors=%u active=%s added=%u cost=%llu",
+                        stats.foveatedCoverageGuardRiskSectors,
+                        stats.foveatedCoverageGuardActive ? "yes" : "no",
+                        stats.foveatedCoverageGuardAddedCount,
+                        static_cast<unsigned long long>(stats.foveatedCoverageGuardAddedCost));
+            ImGui::Text("Temporal: %s / smoothing: %s",
+                        stats.foveatedTemporalHysteresisEnabled ? "on" : "off",
+                        stats.foveatedBoundarySmoothingEnabled ? "on" : "off");
+            ImGui::Text("Direct Prefix: %s", stats.directPrefix ? "yes" : "no");
+            ImGui::Text("Ring Degrees: %.1f / %.1f", stats.foveatedRingDegrees.x, stats.foveatedRingDegrees.y);
+            ImGui::Text("Ring LODs: %.2f / %.2f / %.2f",
+                        stats.foveatedRingLevels.x,
+                        stats.foveatedRingLevels.y,
+                        stats.foveatedRingLevels.z);
+            ImGui::Text("Ring Res: %.2f / %.2f / %.2f",
+                        stats.foveatedResolutionScales.x,
+                        stats.foveatedResolutionScales.y,
+                        stats.foveatedResolutionScales.z);
+            ImGui::Text("SH LOD: %s / degrees=%u/%u/%u / guard=%s / storage=%s",
+                        stats.foveatedShLodEnabled ? "yes" : "no",
+                        stats.shDegreeCenter,
+                        stats.shDegreeMid,
+                        stats.shDegreeOuter,
+                        gaussianShLodGuardModeLabel(stats.shGuardMode),
+                        gaussianShStorageLayoutLabel(stats.shStorageLayout));
+            ImGui::Text("SH AC Reads: %llu coeffs / saved %.1f%%",
+                        static_cast<unsigned long long>(stats.estimatedShAcCoeffReads),
+                        stats.estimatedShAcReadReductionVsDegree3 * 100.0);
+            ImGui::Text("SH Split Bands: L1=%llu L2=%llu L3=%llu bytes=%s saved %.1f%%",
+                        static_cast<unsigned long long>(stats.shBandL1ReadsEst),
+                        static_cast<unsigned long long>(stats.shBandL2ReadsEst),
+                        static_cast<unsigned long long>(stats.shBandL3ReadsEst),
+                        formatBytes(stats.shBandBytesEst).c_str(),
+                        stats.shBandBytesReductionVsMonolithic * 100.0);
+            ImGui::Text("SH Guard: raised=%u (%.2f%%) recovered=%llu saved=%llu",
+                        stats.shGuardRaisedCount,
+                        stats.shGuardRaisedRatio * 100.0,
+                        static_cast<unsigned long long>(stats.shGuardRecoveredAcReads),
+                        static_cast<unsigned long long>(stats.shGuardSavedAcReadsAfterGuard));
+            ImGui::Text("SH Pop: log=%s changed=%u (%.3f%%) proxy=%.3f guard=%u delayed=%u",
+                        stats.shPopLogEnabled ? "on" : "off",
+                        stats.shDegreeChangedCount,
+                        stats.shDegreeChangedRatio * 100.0,
+                        stats.shPopEnergyProxy,
+                        stats.shPopGuardRaiseCount,
+                        stats.shPopDelayedDowngradeCount);
             ImGui::Text("Total Splats: %u", stats.totalSplats);
             ImGui::Text("Prepared Splats: %u", stats.preparedSplats);
+            const uint32_t selectedSplats =
+                stats.lodSelectedRawSplats > 0u ? stats.lodSelectedRawSplats : stats.preparedSplats;
+            const double selectedRatio =
+                stats.totalSplats > 0u ? static_cast<double>(selectedSplats) / static_cast<double>(stats.totalSplats) :
+                                         0.0;
+            ImGui::Text("Selected Ratio: %.3f (%u / %u)", selectedRatio, selectedSplats, stats.totalSplats);
+            ImGui::Text("Ring Budgets: %u / %u / %u",
+                        stats.foveaSplatBudget,
+                        stats.midSplatBudget,
+                        stats.outerSplatBudget);
             ImGui::Text("Visible Cap: %u", stats.maxVisibleSplatCap);
             ImGui::Text("Draw Records: %u", stats.drawRecords);
             ImGui::Text("LOD Raw Splats: %u", stats.lodSelectedRawSplats);
-            ImGui::Text("CLOD Transition Splats: %u", stats.lodTransitionSplats);
             drawOptionalCounter("Visible Splats", stats.visibleSplats);
             drawOptionalCounter("Drawn Splats", stats.drawnSplats);
 
@@ -644,7 +1462,8 @@ namespace vultra
         auto& renderService  = services->require<IRenderService>();
         auto& gpuResourceSvc = services->require<IGpuResourceService>();
 
-        const bool suppressCameraInput = ImGui::GetIO().WantCaptureMouse || ImGui::IsAnyItemHovered() ||
+        const bool suppressCameraInput = gaussianManualGazeControlActive(renderService.gaussianSplatSettings()) ||
+                                         ImGui::GetIO().WantCaptureMouse || ImGui::IsAnyItemHovered() ||
                                          ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow);
         cameraService.setCameraControlInputSuppressed(suppressCameraInput);
 
@@ -652,7 +1471,8 @@ namespace vultra
 
         ImGui::Begin("Universal Renderer");
 
-        drawGaussianSplatBaselinePanel(renderService);
+        drawGaussianSplatBaselinePanel(renderService, backendService);
+        drawGaussianManualGazeOverlay(renderService.gaussianSplatSettings());
 
         if (backendService.isXREnabled() && backendService.isXRMirrorEnabled())
         {
@@ -704,6 +1524,15 @@ namespace vultra
                     ImGui::BeginGroup();
                     ImGui::Text("Eye %u  %ux%u", eyeView.eyeIndex, extent.width, extent.height);
                     ImGui::Image(textureId, imageSize, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f));
+                    if (eyeView.gazeValid)
+                    {
+                        const ImVec2 imageMin = ImGui::GetItemRectMin();
+                        const ImVec2 imageMax = ImGui::GetItemRectMax();
+                        drawGazeMarker(*ImGui::GetWindowDrawList(),
+                                       imageMin,
+                                       {imageMax.x - imageMin.x, imageMax.y - imageMin.y},
+                                       eyeView.gazeUv);
+                    }
                     ImGui::EndGroup();
                 };
 

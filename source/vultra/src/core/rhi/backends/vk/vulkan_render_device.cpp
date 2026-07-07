@@ -17,9 +17,12 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
+#include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <limits>
 #include <set>
+#include <vector>
 
 #if UINTPTR_MAX < UINT64_MAX && !defined(VULTRA_ALLOW_UNSAFE_32BIT_VULKAN_HANDLES)
 #error "32-bit Vulkan build is blocked by default due to handle truncation risk. Enable android_allow_32bit_unsafe to override."
@@ -267,6 +270,24 @@ namespace vultra
     {
         constexpr auto LOGTAG = "RenderDevice";
 
+        [[nodiscard]] bool renderDocSafeDeviceMode()
+        {
+            const char* value = std::getenv("VULTRA_RENDERDOC_SAFE_DEVICE");
+            return value && value[0] != '\0' && value[0] != '0';
+        }
+
+        [[nodiscard]] bool renderDocCaptureLayerRequested()
+        {
+            const char* value = std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE");
+            return value && value[0] != '\0' && value[0] != '0';
+        }
+
+        [[nodiscard]] const char* renderDocLayerName()
+        {
+            const char* value = std::getenv("VULTRA_RENDERDOC_LAYER_NAME");
+            return value && value[0] != '\0' ? value : "VK_LAYER_RENDERDOC_Capture";
+        }
+
         std::array<float, 2> VulkanRenderDevice::getLineWidthRange() const
         {
             if (!m_PhysicalDevice)
@@ -435,9 +456,8 @@ namespace vultra
             }
 
             const uint32_t firstQuery = slotIndex * 2u;
-            m_Device.resetQueryPool(m_ScopeTimeQueryPool, firstQuery, 2u);
-
-            auto cmd = vk::CommandBuffer {asVkHandle<VkCommandBuffer>(commandBufferHandle)};
+            auto           cmd        = vk::CommandBuffer {asVkHandle<VkCommandBuffer>(commandBufferHandle)};
+            cmd.resetQueryPool(m_ScopeTimeQueryPool, firstQuery, 2u);
             cmd.writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, m_ScopeTimeQueryPool, firstQuery);
 
             const uint64_t token = m_ScopeTimeNextToken++;
@@ -549,59 +569,6 @@ namespace vultra
             return RadixSorter::create(std::make_unique<VulkanRadixSorter>(*this, maxElementCount));
         }
 
-        RenderDevice& RenderDevice::uploadDrawIndirect(DrawIndirectBuffer&                     buffer,
-                                                       const std::vector<DrawIndirectCommand>& commands)
-        {
-            if (commands.empty())
-            {
-                return *this;
-            }
-
-            assert(buffer);
-            assert(backendOf(m_Backend).m_Device);
-
-            const uint32_t maxCommands = buffer.getSize();
-
-            assert(commands.size() <= maxCommands);
-
-            std::byte* dst = static_cast<std::byte*>(buffer.map());
-
-            const auto type   = buffer.getDrawIndirectType();
-            const auto stride = buffer.getStride();
-
-            for (uint32_t i = 0; i < commands.size(); ++i)
-            {
-                const DrawIndirectCommand& cmd = commands[i];
-                std::byte*                 ptr = dst + i * stride;
-
-                if (type == DrawIndirectType::eIndexed)
-                {
-                    vk::DrawIndexedIndirectCommand vkCmd {};
-                    vkCmd.indexCount    = cmd.count;
-                    vkCmd.instanceCount = cmd.instanceCount;
-                    vkCmd.firstIndex    = cmd.first;
-                    vkCmd.vertexOffset  = cmd.vertexOffset;
-                    vkCmd.firstInstance = cmd.firstInstance;
-
-                    std::memcpy(ptr, &vkCmd, sizeof(vkCmd));
-                }
-                else
-                {
-                    vk::DrawIndirectCommand vkCmd {};
-                    vkCmd.vertexCount   = cmd.count;
-                    vkCmd.instanceCount = cmd.instanceCount;
-                    vkCmd.firstVertex   = cmd.first;
-                    vkCmd.firstInstance = cmd.firstInstance;
-
-                    std::memcpy(ptr, &vkCmd, sizeof(vkCmd));
-                }
-            }
-
-            buffer.flush().unmap();
-
-            return *this;
-        }
-
         void RenderDevice::createXRDevice()
         {
             assert(HasFlagValues(backendOf(m_Backend).m_FeatureFlag, RenderDeviceFeatureFlagBits::eXR));
@@ -700,6 +667,8 @@ namespace vultra
             std::vector<const char*> enabledLayers;
             std::set<const char*>    layerSet;
             bool                     found  = false;
+            const char*              requestedRenderDocLayerName = renderDocLayerName();
+            const vk::LayerProperties* bestRenderDocLayer = nullptr;
             auto                     layers = vk::enumerateInstanceLayerProperties();
             for (auto& layer : layers)
             {
@@ -709,8 +678,20 @@ namespace vultra
                                   layer.implementationVersion,
                                   layer.specVersion);
 
+                if (std::strcmp(requestedRenderDocLayerName, layer.layerName) == 0)
+                {
+                    if (!bestRenderDocLayer || layer.implementationVersion > bestRenderDocLayer->implementationVersion)
+                    {
+                        bestRenderDocLayer = &layer;
+                    }
+                }
+
                 for (const auto& requestLayer : requestLayers)
                 {
+                    if (renderDocSafeDeviceMode() && strcmp(requestLayer, "VK_LAYER_KHRONOS_synchronization2") == 0)
+                    {
+                        continue;
+                    }
                     if (strcmp(requestLayer, layer.layerName) == 0)
                     {
                         if (layerSet.count(requestLayer) == 0)
@@ -735,6 +716,17 @@ namespace vultra
                     }
                 }
 #endif
+            }
+
+            if (renderDocCaptureLayerRequested() && bestRenderDocLayer && layerSet.count(requestedRenderDocLayerName) == 0)
+            {
+                enabledLayers.push_back(bestRenderDocLayer->layerName);
+                layerSet.insert(requestedRenderDocLayerName);
+                VULTRA_CORE_INFO("[RenderDevice] Enabling RenderDoc layer: {} \"{}\" {}-{}",
+                                 bestRenderDocLayer->layerName.data(),
+                                 bestRenderDocLayer->description.data(),
+                                 bestRenderDocLayer->implementationVersion,
+                                 bestRenderDocLayer->specVersion);
             }
 
 #if _DEBUG
@@ -1070,6 +1062,27 @@ namespace vultra
                 VULTRA_CORE_WARN("[RenderDevice] Extension or feature not supported: synchronization2");
             }
 
+            if (renderDocSafeDeviceMode())
+            {
+                constexpr auto disableForRenderDoc =
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eRayTracingPipeline) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eRayQuery) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eAccelerationStructure) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eMeshShader) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eBufferDeviceAddress) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eDescriptorIndexing) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eDrawIndirectCount) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eMultiDraw) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eDrawParameters) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eMultiview) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eFragmentShaderInterlock) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eDynamicRendering) |
+                    static_cast<uint64_t>(RenderDeviceFeatureReportFlagBits::eSynchronization2);
+                flags = static_cast<RenderDeviceFeatureReportFlagBits>(
+                    static_cast<uint64_t>(flags) & ~disableForRenderDoc);
+                VULTRA_CORE_WARN("[RenderDevice] RenderDoc-safe device mode enabled for capture");
+            }
+
             // Summarize selected device
             VULTRA_CORE_INFO("[RenderDevice] Selected GPU: {}", props.deviceName.data());
             VULTRA_CORE_INFO(
@@ -1167,6 +1180,10 @@ namespace vultra
             queueCreateInfo.pQueuePriorities = &queuePriority;
 
             const auto physicalDeviceFeatures  = backendOf(m_Backend).m_PhysicalDevice.getFeatures();
+            vk::PhysicalDeviceFeatures2        supportedFeatures2 {};
+            vk::PhysicalDeviceVulkan12Features supportedVk12Features {};
+            supportedFeatures2.pNext = &supportedVk12Features;
+            backendOf(m_Backend).m_PhysicalDevice.getFeatures2(&supportedFeatures2);
             const bool useVulkan13CoreFeatures = !backendOf(m_Backend).m_UseKhrDynamicRendering && !backendOf(m_Backend).m_UseKhrSynchronization2;
             // === Base extensions ===
             std::vector<const char*> extensions = {
@@ -1185,7 +1202,10 @@ namespace vultra
             }
 
             // NVIDIA's vk_gaussian_splatting sorter backend (vrdx) uses push descriptors.
-            extensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+            if (!renderDocSafeDeviceMode())
+            {
+                extensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+            }
 
             // === Feature structs ===
             vk::PhysicalDeviceFeatures2        deviceFeatures2 {};
@@ -1198,6 +1218,10 @@ namespace vultra
             enabledFeatures.shaderImageGatherExtended = physicalDeviceFeatures.shaderImageGatherExtended;
             enabledFeatures.shaderInt64               = physicalDeviceFeatures.shaderInt64;
 #endif
+            if (renderDocSafeDeviceMode())
+            {
+                enabledFeatures = vk::PhysicalDeviceFeatures {};
+            }
             deviceFeatures2.features = enabledFeatures;
 
 #ifdef __APPLE__
@@ -1253,7 +1277,10 @@ namespace vultra
             {
                 vk12Features.bufferDeviceAddress = VK_TRUE;
 #ifdef VULTRA_ENABLE_RENDERDOC
-                vk12Features.bufferDeviceAddressCaptureReplay = VK_TRUE;
+                if (supportedVk12Features.bufferDeviceAddressCaptureReplay == VK_TRUE)
+                {
+                    vk12Features.bufferDeviceAddressCaptureReplay = VK_TRUE;
+                }
 #endif
 
                 vk12Features.scalarBlockLayout       = VK_TRUE;
@@ -1271,6 +1298,10 @@ namespace vultra
             if (HasFlagValues(backendOf(m_Backend).m_FeatureReport.flags, RenderDeviceFeatureReportFlagBits::eDrawIndirectCount))
             {
                 vk12Features.drawIndirectCount = VK_TRUE;
+            }
+            if (supportedVk12Features.timelineSemaphore == VK_TRUE)
+            {
+                vk12Features.timelineSemaphore = VK_TRUE;
             }
             featureChain.push_back(reinterpret_cast<vk::BaseOutStructure*>(&vk12Features));
 
@@ -1353,7 +1384,8 @@ namespace vultra
             vk::DeviceCreateInfo createInfo {};
             createInfo.queueCreateInfoCount    = 1;
             createInfo.pQueueCreateInfos       = &queueCreateInfo;
-            createInfo.pNext                   = &deviceFeatures2;
+            createInfo.pNext                   = renderDocSafeDeviceMode() ? nullptr : &deviceFeatures2;
+            createInfo.pEnabledFeatures        = renderDocSafeDeviceMode() ? &deviceFeatures2.features : nullptr;
             createInfo.enabledExtensionCount   = static_cast<uint32_t>(filteredExtensions.size());
             createInfo.ppEnabledExtensionNames = filteredExtensions.data();
 
@@ -1579,6 +1611,173 @@ namespace vultra
 
             // delete data
             delete[] static_cast<std::byte*>(data);
+
+            return true;
+        }
+
+        bool RenderDevice::readTextureToRgba8(const Texture&         texture,
+                                              std::vector<uint8_t>&  rgba,
+                                              uint32_t&              width,
+                                              uint32_t&              height,
+                                              const rhi::ImageAspect imageAspect)
+        {
+            const auto format = texture.getPixelFormat();
+            const bool supported =
+                format == rhi::PixelFormat::eRGBA8_UNorm || format == rhi::PixelFormat::eRGBA8_sRGB ||
+                format == rhi::PixelFormat::eBGRA8_UNorm || format == rhi::PixelFormat::eBGRA8_sRGB;
+            if (!supported)
+            {
+                VULTRA_CORE_ERROR("[RenderDevice] RGBA8 readback only supports RGBA8/BGRA8 textures");
+                return false;
+            }
+
+            auto cb = createCommandBuffer();
+            cb.begin();
+
+            cb.getBarrierBuilder().imageBarrier(
+                {
+                    .image     = const_cast<Texture&>(texture),
+                    .newLayout = rhi::ImageLayout::eGeneral,
+                },
+                {
+                    .dstStage  = rhi::PipelineStages::eTransfer,
+                    .dstAccess = rhi::Access::eTransferRead,
+                });
+
+            auto stagingBuffer = createStagingBuffer(texture.getSize());
+            cb.copyImage(texture, stagingBuffer, imageAspect);
+            cb.getBarrierBuilder().bufferBarrier({.buffer = stagingBuffer},
+                                                 {
+                                                     .dstStage  = rhi::PipelineStages::eTransfer,
+                                                     .dstAccess = rhi::Access::eTransferRead,
+                                                 });
+
+            execute(cb, JobInfo {});
+            backendOf(m_Backend).m_GenericQueue.waitIdle();
+
+            const auto extent = texture.getExtent();
+            width             = extent.width;
+            height            = extent.height;
+            const auto bytesPerPixel = getBytesPerPixel(format);
+            const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+            if (texture.getSize() < pixelCount * bytesPerPixel)
+            {
+                VULTRA_CORE_ERROR("[RenderDevice] Texture readback size is smaller than expected");
+                return false;
+            }
+
+            std::vector<std::byte> data(texture.getSize());
+            auto*                  mappedPtr = stagingBuffer.map();
+            if (!mappedPtr)
+            {
+                VULTRA_CORE_ERROR("[RenderDevice] Failed to map staging buffer for RGBA8 readback");
+                return false;
+            }
+            std::memcpy(data.data(), mappedPtr, data.size());
+            stagingBuffer.unmap();
+
+            rgba.resize(pixelCount * 4u);
+            const auto* source = reinterpret_cast<const uint8_t*>(data.data());
+            const bool  bgra =
+                format == rhi::PixelFormat::eBGRA8_UNorm || format == rhi::PixelFormat::eBGRA8_sRGB;
+            for (size_t i = 0u; i < pixelCount; ++i)
+            {
+                const size_t src = i * bytesPerPixel;
+                const size_t dst = i * 4u;
+                if (bgra)
+                {
+                    rgba[dst + 0u] = source[src + 2u];
+                    rgba[dst + 1u] = source[src + 1u];
+                    rgba[dst + 2u] = source[src + 0u];
+                    rgba[dst + 3u] = source[src + 3u];
+                }
+                else
+                {
+                    rgba[dst + 0u] = source[src + 0u];
+                    rgba[dst + 1u] = source[src + 1u];
+                    rgba[dst + 2u] = source[src + 2u];
+                    rgba[dst + 3u] = source[src + 3u];
+                }
+            }
+
+            return true;
+        }
+
+        bool RenderDevice::saveTextureAlphaToFile(const Texture&         texture,
+                                                  const std::string&     filePath,
+                                                  const rhi::ImageAspect imageAspect)
+        {
+            const auto format = texture.getPixelFormat();
+            const bool hasByteAlpha =
+                format == rhi::PixelFormat::eRGBA8_UNorm || format == rhi::PixelFormat::eRGBA8_sRGB ||
+                format == rhi::PixelFormat::eBGRA8_UNorm || format == rhi::PixelFormat::eBGRA8_sRGB;
+            if (!hasByteAlpha)
+            {
+                VULTRA_CORE_ERROR("[RenderDevice] Alpha capture only supports RGBA8/BGRA8 textures");
+                return false;
+            }
+
+            auto cb = createCommandBuffer();
+            cb.begin();
+
+            cb.getBarrierBuilder().imageBarrier(
+                {
+                    .image     = const_cast<Texture&>(texture),
+                    .newLayout = rhi::ImageLayout::eGeneral,
+                },
+                {
+                    .dstStage  = rhi::PipelineStages::eTransfer,
+                    .dstAccess = rhi::Access::eTransferRead,
+                });
+
+            auto stagingBuffer = createStagingBuffer(texture.getSize());
+            cb.copyImage(texture, stagingBuffer, imageAspect);
+            cb.getBarrierBuilder().bufferBarrier({.buffer = stagingBuffer},
+                                                 {
+                                                     .dstStage  = rhi::PipelineStages::eTransfer,
+                                                     .dstAccess = rhi::Access::eTransferRead,
+                                                 });
+
+            execute(cb, JobInfo {});
+            backendOf(m_Backend).m_GenericQueue.waitIdle();
+
+            std::vector<std::byte> data(texture.getSize());
+            auto*                  mappedPtr = stagingBuffer.map();
+            if (!mappedPtr)
+            {
+                VULTRA_CORE_ERROR("[RenderDevice] Failed to map staging buffer for alpha texture saving");
+                return false;
+            }
+            std::memcpy(data.data(), mappedPtr, data.size());
+            stagingBuffer.unmap();
+
+            const auto width  = texture.getExtent().width;
+            const auto height = texture.getExtent().height;
+            const auto bytesPerPixel = getBytesPerPixel(format);
+            const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+            if (data.size() < pixelCount * bytesPerPixel)
+            {
+                VULTRA_CORE_ERROR("[RenderDevice] Alpha capture staging buffer is smaller than expected");
+                return false;
+            }
+
+            const auto* source = reinterpret_cast<const std::uint8_t*>(data.data());
+            std::vector<std::uint8_t> alpha(pixelCount);
+            for (size_t i = 0; i < pixelCount; ++i)
+            {
+                alpha[i] = source[i * bytesPerPixel + 3u];
+            }
+
+            if (!stbi_write_png(filePath.c_str(),
+                                width,
+                                height,
+                                1,
+                                alpha.data(),
+                                static_cast<int>(width)))
+            {
+                VULTRA_CORE_ERROR("[RenderDevice] Failed to save alpha texture to file: {}", filePath);
+                return false;
+            }
 
             return true;
         }

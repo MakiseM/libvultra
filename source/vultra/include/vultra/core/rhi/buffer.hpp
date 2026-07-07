@@ -19,6 +19,7 @@ namespace vultra
         {
             friend class RenderDevice;
             friend class Barrier;
+            friend class CommandBuffer;
 
         public:
             Buffer()              = default;

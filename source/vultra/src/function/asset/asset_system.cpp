@@ -21,7 +21,6 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
-#include <numeric>
 #include <string_view>
 
 namespace vultra
@@ -926,20 +925,26 @@ namespace vultra
         std::vector<glm::uvec4> packedCovariances;
         std::vector<glm::uvec2> packedColors;
         std::vector<glm::uvec2> packedSh;
-        std::vector<float>      packedImportance;
+        std::vector<glm::uvec2> packedShL1;
+        std::vector<glm::uvec2> packedShL2;
+        std::vector<glm::uvec2> packedShL3;
+        std::vector<resource::GpuGaussianSplatShEnergyMetadata> packedShEnergyMetadata;
 
         packedCenters.reserve(cpuSplat.splats.size());
         packedScales.reserve(cpuSplat.splats.size());
         packedCovariances.reserve(cpuSplat.splats.size());
         packedColors.reserve(cpuSplat.splats.size());
         packedSh.reserve(cpuSplat.splats.size() * resource::GpuGaussianSplat::s_PackedShRestCoeffs);
-        packedImportance.reserve(cpuSplat.splats.size());
+        packedShL1.reserve(cpuSplat.splats.size() * resource::GpuGaussianSplat::s_PackedShL1Coeffs);
+        packedShL2.reserve(cpuSplat.splats.size() * resource::GpuGaussianSplat::s_PackedShL2Coeffs);
+        packedShL3.reserve(cpuSplat.splats.size() * resource::GpuGaussianSplat::s_PackedShL3Coeffs);
+        packedShEnergyMetadata.reserve(cpuSplat.splats.size());
 
-        // The CLOD renderer only needs a per-point rank. Keep the imported
-        // importance side-by-side with the packed, alpha-filtered points so the
-        // eventual order always indexes the GPU-local point array, not the source
-        // file array that may contain discarded invalid/transparent splats.
-        const bool hasPerPointImportance = cpuSplat.lod.importance.size() == cpuSplat.splats.size();
+        auto sanitizeShCoeff = [](float value) -> float {
+            if (!std::isfinite(value))
+                return 0.0f;
+            return std::clamp(value, -10.0f, 10.0f);
+        };
 
         for (size_t i = 0; i < cpuSplat.splats.size(); ++i)
         {
@@ -952,8 +957,6 @@ namespace vultra
                 continue;
 
             packedCenters.push_back(glm::vec4(p.position, 1.0f));
-            packedImportance.push_back(
-                hasPerPointImportance && std::isfinite(cpuSplat.lod.importance[i]) ? cpuSplat.lod.importance[i] : 0.0f);
 
             const glm::vec3 baseRgb = decodeBaseRgb(p);
             packedColors.emplace_back(packF16x2Clamp01(baseRgb.r, baseRgb.g), packF16x2Clamp01(baseRgb.b, alpha));
@@ -980,6 +983,9 @@ namespace vultra
             packedCovariances.emplace_back(packF16x2(m11, m12), packF16x2(m13, m22), packF16x2(m23, m33), 0u);
 
             const size_t pointBase = i * static_cast<size_t>(fileRestCoeffs) * 3ull;
+            float highEnergyAfter0 = 0.0f;
+            float highEnergyAfter1 = 0.0f;
+            float highEnergyAfter2 = 0.0f;
             for (int k = 0; k < kTargetRest; ++k)
             {
                 float rr = 0.0f;
@@ -995,20 +1001,33 @@ namespace vultra
                         bb = cpuSplat.sh[coeffBase + 2ull];
                     }
 
-                    if (!std::isfinite(rr))
-                        rr = 0.0f;
-                    if (!std::isfinite(gg))
-                        gg = 0.0f;
-                    if (!std::isfinite(bb))
-                        bb = 0.0f;
-
-                    rr = std::clamp(rr, -10.0f, 10.0f);
-                    gg = std::clamp(gg, -10.0f, 10.0f);
-                    bb = std::clamp(bb, -10.0f, 10.0f);
+                    rr = sanitizeShCoeff(rr);
+                    gg = sanitizeShCoeff(gg);
+                    bb = sanitizeShCoeff(bb);
                 }
 
-                packedSh.emplace_back(packF16x2(rr, gg), packF16x2(bb, 0.0f));
+                const float coeffEnergy = rr * rr + gg * gg + bb * bb;
+                highEnergyAfter0 += coeffEnergy;
+                if (k >= 3)
+                    highEnergyAfter1 += coeffEnergy;
+                if (k >= 8)
+                    highEnergyAfter2 += coeffEnergy;
+
+                const glm::uvec2 packedCoeff {packF16x2(rr, gg), packF16x2(bb, 0.0f)};
+                packedSh.push_back(packedCoeff);
+                if (k < 3)
+                    packedShL1.push_back(packedCoeff);
+                else if (k < 8)
+                    packedShL2.push_back(packedCoeff);
+                else
+                    packedShL3.push_back(packedCoeff);
             }
+            packedShEnergyMetadata.push_back(resource::GpuGaussianSplatShEnergyMetadata {
+                .highEnergyAfter0 = highEnergyAfter0,
+                .highEnergyAfter1 = highEnergyAfter1,
+                .highEnergyAfter2 = highEnergyAfter2,
+                .reserved         = 0.0f,
+            });
         }
 
         if (packedCenters.empty())
@@ -1031,29 +1050,62 @@ namespace vultra
         for (const auto& c : packedCenters)
             radius = std::max(radius, glm::length(glm::vec3(c) - center));
 
+        auto percentile95ShEnergy = [&packedShEnergyMetadata](const uint32_t component) -> float {
+            if (packedShEnergyMetadata.empty())
+                return 0.0f;
+
+            std::vector<float> values;
+            values.reserve(packedShEnergyMetadata.size());
+            for (const auto& e : packedShEnergyMetadata)
+            {
+                switch (component)
+                {
+                    case 0u:
+                        values.push_back(e.highEnergyAfter0);
+                        break;
+                    case 1u:
+                        values.push_back(e.highEnergyAfter1);
+                        break;
+                    default:
+                        values.push_back(e.highEnergyAfter2);
+                        break;
+                }
+            }
+
+            const size_t index = std::min(values.size() - 1u,
+                                          static_cast<size_t>(std::ceil(static_cast<float>(values.size() - 1u) * 0.95f)));
+            std::nth_element(values.begin(), values.begin() + index, values.end());
+            return values[index];
+        };
+
+        glm::vec3 shEnergySum(0.0f);
+        for (const auto& e : packedShEnergyMetadata)
+            shEnergySum += glm::vec3(e.highEnergyAfter0, e.highEnergyAfter1, e.highEnergyAfter2);
+
         resource::GpuGaussianSplat out;
         out.pointCount  = static_cast<uint32_t>(packedCenters.size());
         out.shDegree    = fileDegree;
         out.center      = center;
         out.radius      = radius;
-        // Ordered CLOD consumes a prefix of clodPointIndices. Larger importance
-        // means earlier rank. The stable tie-breaker keeps output deterministic
-        // and gives a raw-order fallback when the asset has no importance stream.
-        out.clodPointIndices.resize(out.pointCount);
-        std::iota(out.clodPointIndices.begin(), out.clodPointIndices.end(), 0u);
-        if (hasPerPointImportance && packedImportance.size() == out.clodPointIndices.size())
+        out.shEnergyMetadataAvailable = packedShEnergyMetadata.size() == packedCenters.size();
+        if (out.shEnergyMetadataAvailable && out.pointCount > 0u)
         {
-            std::stable_sort(out.clodPointIndices.begin(), out.clodPointIndices.end(), [&](const uint32_t a, const uint32_t b) {
-                if (packedImportance[a] != packedImportance[b])
-                    return packedImportance[a] > packedImportance[b];
-                return a < b;
-            });
+            out.shEnergyMean = shEnergySum / static_cast<float>(out.pointCount);
+            out.shEnergyP95  = glm::vec3(percentile95ShEnergy(0u),
+                                         percentile95ShEnergy(1u),
+                                         percentile95ShEnergy(2u));
         }
         out.pointOffset = pool.gaussianStorage.appendCenters(*m_RenderDevice, packedCenters.data(), out.pointCount);
         pool.gaussianStorage.appendScales(*m_RenderDevice, packedScales.data(), out.pointCount);
         pool.gaussianStorage.appendCovariances(*m_RenderDevice, packedCovariances.data(), out.pointCount);
         pool.gaussianStorage.appendColors(*m_RenderDevice, packedColors.data(), out.pointCount);
         pool.gaussianStorage.appendSh(*m_RenderDevice, packedSh.data(), static_cast<uint32_t>(packedSh.size()));
+        pool.gaussianStorage.appendShL1(*m_RenderDevice, packedShL1.data(), static_cast<uint32_t>(packedShL1.size()));
+        pool.gaussianStorage.appendShL2(*m_RenderDevice, packedShL2.data(), static_cast<uint32_t>(packedShL2.size()));
+        pool.gaussianStorage.appendShL3(*m_RenderDevice, packedShL3.data(), static_cast<uint32_t>(packedShL3.size()));
+        pool.gaussianStorage.appendShEnergyMetadata(*m_RenderDevice,
+                                                    packedShEnergyMetadata.data(),
+                                                    static_cast<uint32_t>(packedShEnergyMetadata.size()));
 
         const uint32_t index = static_cast<uint32_t>(pool.gaussianSplats.size());
         pool.gaussianSplats.push_back(std::move(out));
